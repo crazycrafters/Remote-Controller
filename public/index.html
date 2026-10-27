@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Remote Controller</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body><main><header><div><span class="eyebrow">YOUR PRIVATE CONNECTION</span><h1>Remote Controller</h1></div><span id="status" role="status">Disconnected</span></header>
+<section id="login"><h2>Connect to your home PC</h2><p>Enter the access token configured on your home agent. Use a private VPN for remote access.</p><form id="connect"><label for="token">Access token</label><div class="row"><input id="token" type="password" required autocomplete="off" placeholder="Agent access token"><button>Connect</button></div></form></section>
+<p id="message" role="alert"></p>
+<div id="workspace" hidden><div class="toolbar"><p>Manage your shared files and permitted applications.</p><button id="disconnect" class="secondary">Disconnect</button></div>
+<section><div class="section-title"><h2>Shared files</h2><button id="refresh-files" class="secondary">Refresh</button></div><div class="row"><button id="up" class="secondary">↑ Parent</button><code id="folder">/</code></div><ul id="files"></ul></section>
+<section><div class="section-title"><div><h2>Applications</h2><p>Only applications permitted by the home agent appear here.</p></div><button id="refresh-apps" class="secondary">Refresh</button></div><ul id="apps"></ul><p class="muted">Close requests may take time. Force stop can lose unsaved progress.</p></section></div>
+<footer>Personal MVP · File access and application controls · No screen sharing</footer></main></body></html>

@@ -1,0 +1,8 @@
+{
+  "name": "remote-controller-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node src/server.js", "test": "node --test", "check": "node --check src/server.js && node --check src/agent.js && node --check src/processes.js && node --check public/app.js" }
+}
