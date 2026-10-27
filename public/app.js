@@ -1,5 +1,6 @@
 let token = '';
 let folder = '';
+let parent = null;
 const $ = id => document.getElementById(id);
 function message(text = '') { $('message').textContent = text; }
 async function api(route, options = {}) {
@@ -19,12 +20,14 @@ function button(label, action, className = 'secondary') {
 }
 async function files() {
   const data = await (await api(`/api/files?path=${encodeURIComponent(folder)}`)).json();
-  $('folder').textContent = '/' + folder;
-  $('up').disabled = !folder;
+  folder = data.path;
+  parent = data.parent;
+  $('folder').textContent = folder || 'Computer';
+  $('up').disabled = parent === null;
   $('files').replaceChildren();
   for (const entry of data.entries) {
     const li = document.createElement('li');
-    const relative = folder ? `${folder}/${entry.name}` : entry.name;
+    const relative = entry.path;
     li.append(button(`${entry.directory ? '📁' : '📄'} ${entry.name}`, async () => {
       if (entry.directory) {
         const previous = folder;
@@ -66,10 +69,14 @@ $('connect').onsubmit = async event => {
   try {
     const health = await (await api('/api/health')).json();
     $('status').textContent = `Connected · ${health.platform}`; $('workspace').hidden = false; $('login').hidden = true;
+    const roots = await (await api('/api/roots')).json();
+    $('file-mode').textContent = roots.mode === 'system' ? 'All drives and folders accessible to the home agent.' : 'Access is limited to the configured shared folder.';
+    folder = '';
     await files(); await apps();
   } catch (error) { message(error.message); }
 };
 function action(id, fn) { $(id).onclick = async () => { message(); try { await fn(); } catch (error) { message(error.message); } }; }
+action('computer', async () => { const previous = folder; folder = ''; try { await files(); } catch (error) { folder = previous; throw error; } });
 action('refresh-files', files); action('refresh-apps', apps);
-action('up', async () => { const previous = folder; folder = folder.split('/').slice(0, -1).join('/'); try { await files(); } catch (error) { folder = previous; throw error; } });
+action('up', async () => { const previous = folder; folder = parent; try { await files(); } catch (error) { folder = previous; throw error; } });
 $('disconnect').onclick = disconnect;

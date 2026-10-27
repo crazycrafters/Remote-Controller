@@ -35,7 +35,8 @@ export async function createServer(config) {
         return json(401, { error: 'Authentication required' });
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(200, { status: 'ok', platform: process.platform });
-      if (req.method === 'GET' && url.pathname === '/api/files') return json(200, { entries: await agent.files(url.searchParams.get('path') || '') });
+      if (req.method === 'GET' && url.pathname === '/api/roots') return json(200, await agent.roots());
+      if (req.method === 'GET' && url.pathname === '/api/files') return json(200, await agent.browse(url.searchParams.get('path') || ''));
       if (req.method === 'GET' && url.pathname === '/api/download') {
         const result = await agent.download(url.searchParams.get('path') || '');
         res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': result.size, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(result.name)}` });
@@ -68,12 +69,11 @@ export async function createServer(config) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const token = process.env.RC_TOKEN;
   if (!token || Buffer.byteLength(token) < 32) throw new Error('Set RC_TOKEN to a random secret of at least 32 bytes');
-  if (!process.env.RC_ROOT) throw new Error('Set RC_ROOT to the folder you want to share');
   const host = process.env.RC_BIND || '127.0.0.1';
   const port = Number(process.env.RC_PORT || 4310);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid RC_PORT');
   const hosts = (process.env.RC_HOSTS || `localhost:${port},127.0.0.1:${port}`).split(',');
   const origins = (process.env.RC_ORIGINS || `http://localhost:${port},http://127.0.0.1:${port}`).split(',');
-  const server = await createServer({ token, root: process.env.RC_ROOT, hosts, origins, allowedApps: (process.env.RC_ALLOWED_APPS || '').split(',').filter(Boolean) });
+  const server = await createServer({ token, root: process.env.RC_ROOT, fileMode: process.env.RC_FILE_MODE, hosts, origins, allowedApps: (process.env.RC_ALLOWED_APPS || '').split(',').filter(Boolean) });
   server.listen(port, host, () => console.log(`Remote Controller listening on ${host}:${port}; use only localhost or a private encrypted VPN connection.`));
 }
