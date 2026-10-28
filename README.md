@@ -4,6 +4,69 @@ A Node.js home-computer agent with a browser dashboard. Browse all available dri
 download files, and close explicitly permitted applications without taking over
 someone else's desktop. Requires Node.js 22 or newer. No third-party dependencies.
 
+## Central company device inventory
+
+A separate management server assigns IDs like `WORK-PC-1A2B3C4D5E6F`. IDs are
+public identifiers, not passwords. Administrators sign in once; enrolled devices
+keep a server-issued credential locally, without manually copying access tokens.
+The dashboard supports search, online/offline status, and device revocation.
+
+This is **inventory only**: hostname, OS, enrollment time, and heartbeat time.
+It does not collect employee screen contents, files, application usage, or browsing
+history. The inventory client runs visibly in a terminal and states what it sends.
+The existing direct file/control agent remains separate and still uses RC_TOKEN;
+central remote-control sessions, visible session notifications, and audit logs are
+not implemented yet. The IDs currently identify devices, not remote-control sessions.
+
+### Run the management server
+
+For local development in PowerShell:
+
+```powershell
+# Set this to your own strong administrator password; never commit it.
+$env:RC_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', (Read-Host 'Administrator password' -AsSecureString)).Password
+$env:RC_MANAGEMENT_LOCAL_HTTP = '1'
+npm run management
+```
+
+Open the management dashboard locally on port 4320. Sign in and select **Create
+enrollment code**. Each code enrolls one PC and expires after 10 minutes.
+For remote deployment, put the server behind HTTPS on your private network, leave
+RC_MANAGEMENT_LOCAL_HTTP unset (secure cookies), and configure exact
+RC_MANAGEMENT_HOSTS and RC_MANAGEMENT_ORIGINS for the external HTTPS address.
+RC_MANAGEMENT_BIND defaults to loopback; keep it there when using a local reverse
+proxy. RC_MANAGEMENT_PORT defaults to 4320.
+
+### Enroll each PC
+
+In a separate PowerShell terminal on the PC being enrolled:
+
+```powershell
+# Use your management server's HTTPS origin on remote PCs.
+$env:RC_SERVER_URL = 'http://127.0.0.1:4320'
+$env:RC_ENROLLMENT_CODE = Read-Host 'One-use enrollment code'
+npm run device
+```
+
+The server assigns the ID; restarting `npm run device` retains it and does not
+need another code. Heartbeats run every 30 seconds; a PC is considered offline
+after 90 seconds without one. Revocation rejects future heartbeats. Stop the
+visible client with Ctrl+C. No background installation or concealment is added.
+
+RC_MANAGEMENT_DATA defaults to `.remote-controller-server`; RC_DEVICE_DATA defaults
+to `.remote-controller-device`. Back up the server data and protect the device's
+identity file: it contains its credential. These directories are Git-ignored.
+Unix file permissions are restricted when created; on Windows, secure them with
+appropriate account ACLs. Do not clone a populated device identity directory into
+an image shipped to multiple employees: enroll each PC separately after imaging.
+A renamed PC retains its enrollment ID; updating its inventory name is future work.
+
+This prototype uses a single-process JSON registry and one administrator password.
+It is not a scalable company deployment yet. Production work includes a database,
+organization isolation, administrator accounts with MFA/SSO and roles, credential
+rotation, audited access, signed installation and updates, and disclosed session
+controls. No central monitoring capability is enabled by this change.
+
 ## Start locally
 
 ```sh

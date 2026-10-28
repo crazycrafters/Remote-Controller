@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
-  "scripts": { "start": "node src/server.js", "test": "node --test", "check": "node --check src/server.js && node --check src/filesystem.js && node --check src/agent.js && node --check src/processes.js && node --check public/app.js" }
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/filesystem.js && node --check src/agent.js && node --check src/processes.js && node --check public/app.js && node --check src/registry.js && node --check src/management-server.js && node --check src/device-client.js && node --check registry-public/app.js",
+    "management": "node src/management-server.js",
+    "device": "node src/device-client.js"
+  }
 }
