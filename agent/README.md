@@ -1,7 +1,8 @@
 # Managed PC agent
 
-Deploy this directory to each PC. Requires Node.js 22+. No server source or
-third-party runtime dependencies are needed.
+Deploy this directory to each PC. Requires Node.js 22+. No server source is needed. Install dependencies with `npm ci` from the repository
+root before starting; standalone agent deployments need `npm install --omit=dev`
+in the agent directory. ZIP creation uses the `yazl` package.
 
 1. Copy `.env.example` to `.env` here.
 2. Set RC_SERVER_URL to your management server's HTTPS origin, including its port.

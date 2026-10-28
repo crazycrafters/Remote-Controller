@@ -22,6 +22,7 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   const base = `http://${host}`;
   const post = (route, data, cookie) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(data) });
   assert.equal((await fetch(base + '/api/devices')).status, 401);
+  assert.equal((await fetch(base + '/api/archives')).status, 401);
   assert.equal((await post('/api/control', { id: 'PC-Linux', operation: 'files' })).status, 401);
   assert.equal((await post('/api/device/poll', { id: 'PC-Linux' })).status, 401);
   assert.equal((await post('/api/login', { password: 'wrong' })).status, 401);
@@ -149,6 +150,20 @@ test('one agent loads .env, auto-connects, serves central file controls, reconne
   assert.equal(terminal.stdout.trim(), root);
   const downloaded = await (await control('download', { path: 'sample.bin' })).json();
   assert.deepEqual(Buffer.from(downloaded.data, 'base64'), binary);
+  await mkdir(path.join(root, 'source')); await mkdir(path.join(root, 'destination'));
+  await writeFile(path.join(root, 'source', 'inside.txt'), 'archive content');
+  const copied = await (await control('copy', { paths: ['source'], destination: 'destination' })).json();
+  assert.equal(copied.copied, 1);
+  const zipped = await control('zipupload', { paths: ['source', 'destination'] });
+  assert.equal(zipped.status, 200);
+  const archive = await zipped.json(); assert.ok(archive.id);
+  const serverArchives = await (await fetch(base + '/api/archives?deviceId=' + encodeURIComponent(device.id))).json();
+  assert.equal(serverArchives.archives.length, 1);
+  const archiveDownload = await fetch(base + '/api/archives/' + archive.id + '/download');
+  assert.equal(archiveDownload.status, 200);
+  const archiveBytes = Buffer.from(await archiveDownload.arrayBuffer());
+  assert.equal(archiveBytes.readUInt32LE(0), 0x04034b50);
+
   assert.equal((await control('files', { path: '..' })).status, 403);
   assert.ok(Array.isArray((await (await control('applications')).json()).applications));
   assert.equal((await control('shell')).status, 400);

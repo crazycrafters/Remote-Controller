@@ -11,15 +11,20 @@ export function createCommands({ timeout = 60_000, pollTimeout = 10_000 } = {}) 
   }
   return {
     submit(deviceId, operation, args = {}) {
-      if (!['roots', 'files', 'download', 'applications', 'close', 'terminal'].includes(operation)) throw fail(400, 'Unsupported operation');
+      if (!['roots', 'files', 'download', 'applications', 'close', 'terminal', 'copy', 'zipupload'].includes(operation)) throw fail(400, 'Unsupported operation');
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw fail(400, 'Invalid operation arguments');
       if (jobs.size >= 100 || [...jobs.values()].filter(j => j.deviceId === deviceId).length >= 10) throw fail(429, 'Too many pending requests');
       const id = randomUUID();
+      const duration = ['zipupload', 'copy'].includes(operation) ? Math.max(timeout, 10 * 60_000) : timeout;
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => { jobs.delete(id); reject(fail(504, 'Agent did not respond within 60 seconds; refresh before retrying an action')); }, timeout);
+        const timer = setTimeout(() => { jobs.delete(id); reject(fail(504, `Agent did not respond within ${Math.round(duration / 1000)} seconds; refresh before retrying an action`)); }, duration);
         jobs.set(id, { id, deviceId, operation, args, dispatched: false, resolve, reject, timer });
         waiting.get(deviceId)?.finish(next(deviceId));
       });
+    },
+    authorize(deviceId, id, operation) {
+      const job = jobs.get(id);
+      if (!job || job.deviceId !== deviceId || !job.dispatched || job.operation !== operation) throw fail(403, 'No active archive upload request for this device');
     },
     next,
     wait(deviceId, signal) {

@@ -1,7 +1,7 @@
 # Remote Controller MVP
 
 A Node.js agent for managed PCs and a separate central management server. Requires
-Node.js 22 or newer. No third-party runtime dependencies.
+Node.js 22 or newer. The agent uses `yazl` to create ZIP archives; install dependencies with `npm ci`.
 
 ## Quick test: two terminals, no passwords
 
@@ -275,3 +275,27 @@ Renderer processes and browsers that do not expose enough information have no
 profile label; profile ownership is not guessed. Raw process command lines and
 browser account details are not sent to the dashboard. Windows/macOS profile
 discovery and terminal behavior still need native validation.
+
+## Select, copy/paste, and ZIP upload
+
+In a PC workspace, use the checkboxes beside files/folders or **Select all**.
+Choose **Copy**, navigate to a destination folder on the same PC, and choose
+**Paste here**. Copy preserves sources and refuses existing destination names;
+it does not overwrite, cut/move, or copy between PCs. Copying into a selected
+folder's own descendants is rejected.
+
+Choose **Zip & upload to server** to create one ZIP containing all selected
+files/folders, including their directory structure and empty folders. The ZIP
+streams from the agent to the management server; it does not first download to
+your browser. Open **Uploaded ZIP archives on server** to see or download it.
+The server stores ZIPs and metadata in `RC_MANAGEMENT_DATA/uploads`. Archives
+persist across restarts and have no automatic retention/deletion policy.
+
+Current limits: 100 top-level selected items, 10,000 total entries, 1 GiB source
+data, and a 256 MiB compressed ZIP. Copy/ZIP requests allow up to 10 minutes.
+Symbolic links and special files are rejected. Operations follow the agent's
+existing filesystem scope and OS permissions. Large operations show a busy
+status; byte-by-byte progress and resumable transfers are not implemented.
+Interrupted uploads do not appear as completed archives; temporary ZIPs on the
+agent are removed after success/failure. The browser clipboard lasts for the
+current PC page only.

@@ -1,4 +1,5 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { hostname } from 'node:os';
 import path from 'node:path';
 
@@ -32,6 +33,17 @@ export async function connectDevice({ server, directory, code, fetcher = fetch, 
   await rename(filename + '.tmp', filename);
   return {
     id: identity.id,
+    async uploadArchive(commandId, archive) {
+      const response = await fetcher(`${server}/api/device/archive/${encodeURIComponent(commandId)}`, {
+        method: 'PUT', duplex: 'half', redirect: 'error',
+        signal: AbortSignal.any([AbortSignal.timeout(10 * 60_000), ...(signal ? [signal] : [])]),
+        headers: { Authorization: `Bearer ${identity.credential}`, 'X-Device-Id': identity.id, 'Content-Type': 'application/zip', 'Content-Length': String(archive.size) },
+        body: createReadStream(archive.filename)
+      });
+      const result = await response.json();
+      if (!response.ok) throw Object.assign(new Error(result.error || 'Archive upload failed'), { status: response.status });
+      return result;
+    },
     disconnect: () => request('/api/device/disconnect', { id: identity.id }, identity.credential, true),
     heartbeat: () => request('/api/heartbeat', { id: identity.id }, identity.credential),
     poll: () => request('/api/device/poll', { id: identity.id }, identity.credential),

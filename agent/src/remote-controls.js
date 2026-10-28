@@ -1,7 +1,13 @@
 // Typed operations use filesystem/process APIs plus the explicitly authorized administrative terminal.
-export async function executeCommand(agent, command) {
+export async function executeCommand(agent, command, { uploadArchive } = {}) {
   const args = command.args || {};
   switch (command.operation) {
+    case 'copy': return agent.copy(args.paths, args.destination);
+    case 'zipupload': {
+      if (!uploadArchive) throw Object.assign(new Error('Archive upload transport is unavailable'), { status: 502 });
+      const archive = await agent.archive(args.paths);
+      try { return await uploadArchive(archive); } finally { await archive.cleanup(); }
+    }
     case 'terminal': return agent.terminal(args.command, args.path);
     case 'roots': return agent.roots();
     case 'files': return agent.browse(args.path || '');

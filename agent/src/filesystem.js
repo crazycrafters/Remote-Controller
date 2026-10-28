@@ -1,4 +1,5 @@
-import { realpath, readdir, stat, open } from 'node:fs/promises';
+import { realpath, readdir, stat, open, lstat } from 'node:fs/promises';
+import { fileActions } from './file-actions.js';
 import { constants } from 'node:fs';
 import path from 'node:path';
 
@@ -40,7 +41,15 @@ export async function createFilesystem({ root, fileMode = root ? 'folder' : 'sys
     }
     return target;
   }
+  const actions = fileActions({ resolve: async value => {
+    if (typeof value !== 'string' || value.includes('\0')) throw invalid('Invalid path');
+    const target = await resolve(value);
+    const input = system ? validateSystemPath(value) : path.resolve(base, value);
+    if ((await lstat(input)).isSymbolicLink()) throw invalid('Select regular folders/files, without symbolic links');
+    return target;
+  } });
   return {
+    ...actions,
     async directory(value) {
       const folder = await resolve(value);
       if (!(await stat(folder)).isDirectory()) throw invalid('Terminal location must be a folder');

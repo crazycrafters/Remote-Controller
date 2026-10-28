@@ -15,6 +15,8 @@ export async function createAgent({ root, fileMode, allowedApps, processes = lis
   const tickets = new Map();
   return {
     roots: filesystem.roots,
+    copy: filesystem.copy,
+    archive: filesystem.archive,
     async terminal(command, folder) { return runShell(command, await filesystem.directory(folder)); },
     browse: filesystem.browse,
     async files(value = '') {

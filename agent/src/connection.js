@@ -19,7 +19,7 @@ export async function runConnection({ device, agent, signal, log = console.log, 
   async function execute(command) {
     log(`Management request: ${command.operation}`);
     let result, error;
-    try { result = await executeCommand(agent, command); }
+    try { result = await executeCommand(agent, command, { uploadArchive: archive => device.uploadArchive(command.id, archive) }); }
     catch (failure) {
       const messages = { ENOENT: 'This file or folder no longer exists.', EACCES: 'The agent account cannot access this file or folder.', EPERM: 'The operating system denied this operation.', EBUSY: 'This file or application is busy.', ENOTDIR: 'The selected path is not a folder.' };
       error = { status: failure.status || ({ ENOENT: 404, EACCES: 403, EPERM: 403, ENOTDIR: 400 }[failure.code]) || 502, message: failure.status ? failure.message : messages[failure.code] || 'File or application operation failed on the managed PC.' };

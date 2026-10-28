@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { pipeline } from 'node:stream/promises';
+import { createArchiveStore } from './archives.js';
 import { readFile } from 'node:fs/promises';
 import { randomBytes, scryptSync, timingSafeEqual, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +12,7 @@ export async function createManagementServer({ directory, password, hosts, origi
   if (!testNoAuth && (typeof password !== 'string' || password.length < 12)) throw new Error('Set RC_ADMIN_PASSWORD to at least 12 characters');
   const registry = await createRegistry(directory);
   const commands = createCommands();
+  const archives = createArchiveStore(directory);
   const disconnected = new Set();
   const persistedHeartbeats = new Map();
   const subscribers = new Set();
@@ -100,6 +103,15 @@ export async function createManagementServer({ directory, password, hosts, origi
         }
         catch (error) { recordFailure(`device:${ip}`); throw error; }
       }
+      if (req.method === 'PUT' && url.pathname.startsWith('/api/device/archive/')) {
+        const device = registry.authenticate(req.headers['x-device-id'], req.headers.authorization?.replace(/^Bearer /, ''));
+        if (disconnected.has(device.id)) return json(409, { error: 'Device disconnected' });
+        const id = url.pathname.slice('/api/device/archive/'.length);
+        commands.authorize(device.id, id, 'zipupload');
+        if (req.headers['content-type'] !== 'application/zip') return json(415, { error: 'ZIP upload required' });
+        const result = await archives.save(id, device.id, req);
+        return json(201, result);
+      }
       if (req.method === 'POST' && ['/api/device/poll', '/api/device/result', '/api/device/disconnect'].includes(url.pathname)) {
         const credential = req.headers.authorization?.replace(/^Bearer /, '');
         let device;
@@ -131,6 +143,12 @@ export async function createManagementServer({ directory, password, hosts, origi
         res.setHeader('Set-Cookie', 'rc_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
         return json(200, { status: 'signed-out' });
       }
+      if (req.method === 'GET' && url.pathname === '/api/archives') return json(200, { archives: await archives.list(url.searchParams.get('deviceId')) });
+      if (req.method === 'GET' && /^\/api\/archives\/[^/]+\/download$/.test(url.pathname)) {
+        const result = await archives.download(url.pathname.split('/')[3]);
+        res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': result.size, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(result.metadata.name)}` });
+        await pipeline(result.stream, res); return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
         subscribers.add(res); res.write(`event: devices\ndata: ${JSON.stringify({ devices: snapshot() })}\n\n`);
@@ -143,7 +161,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       }
       if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: snapshot() });
       if (req.method === 'POST' && url.pathname === '/api/control') {
-        const data = await body(16 * 1024);
+        const data = await body(128 * 1024);
         const device = registry.list().find(device => device.id === data.id && !device.revoked && device.approved);
         if (!device || !presence.connected(device.id)) return json(409, { error: 'Agent is not connected; start it and refresh devices' });
         return json(200, await commands.submit(device.id, data.operation, data.args));
@@ -160,6 +178,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       }
       json(404, { error: 'Not found' });
     } catch (error) {
+      if (res.headersSent) { res.destroy(); return; }
       const storageErrors = {
         EEXIST: 'Server storage path is not a directory. Check RC_MANAGEMENT_DATA.',
         ENOTDIR: 'Server storage path is not a directory. Check RC_MANAGEMENT_DATA.',
@@ -173,6 +192,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       json(error.status || 500, { error: error.status ? error.message : storageErrors[error.code] || `Server could not complete this request. Reference: ${requestId}`, requestId });
     }
   });
+  server.requestTimeout = 10 * 60_000;
   server.on('close', () => { commands.close(); presence.close(); for (const response of subscribers) response.end(); subscribers.clear(); });
   return server;
 }
