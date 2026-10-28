@@ -23,7 +23,6 @@ export async function connectDevice({ server, directory, code, fetcher = fetch }
     return result;
   }
   if (!identity) {
-    if (!code) throw new Error('Create a one-use enrollment code in the admin dashboard and set RC_ENROLLMENT_CODE');
     const assigned = await request('/api/enroll', { code, device: { hostname: hostname(), platform: process.platform } });
     identity = { server, ...assigned };
     await writeFile(filename, JSON.stringify(identity), { mode: 0o600, flag: 'wx' });
@@ -38,7 +37,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log(`Device ID: ${device.id}. Keep this terminal open. Press Ctrl+C to stop reporting.`);
   let stopped = false;
   const stop = () => { stopped = true; clearInterval(timer); };
-  const report = async () => { try { await device.heartbeat(); } catch (error) { console.error(error.message); } };
+  let lastStatus;
+  const report = async () => { try {
+    const result = await device.heartbeat();
+    if (result.status !== lastStatus) console.log(result.status === 'pending' ? 'Awaiting administrator approval.' : 'Device approved and registered.');
+    lastStatus = result.status;
+  } catch (error) { console.error(error.message); } };
   await report();
   const timer = setInterval(() => { if (!stopped) void report(); }, 30_000);
   process.on('SIGINT', stop); process.on('SIGTERM', stop);

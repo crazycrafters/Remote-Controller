@@ -57,8 +57,8 @@ export async function createManagementServer({ directory, password, hosts, origi
       }
       if (req.method === 'POST' && url.pathname === '/api/enroll') {
         const data = await body();
-        try { return json(201, await registry.enroll(data.code, data.device)); }
-        catch (error) { recordFailure(); throw error; }
+        recordFailure(); // Bound registration attempts as well as failed authentication.
+        return json(201, await registry.enroll(data.code, data.device));
       }
       if (req.method === 'POST' && url.pathname === '/api/heartbeat') {
         const data = await body();
@@ -75,6 +75,9 @@ export async function createManagementServer({ directory, password, hosts, origi
       }
       if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: registry.list() });
       if (req.method === 'POST' && url.pathname === '/api/invites') return json(201, registry.invite());
+      if (req.method === 'POST' && url.pathname === '/api/approve') {
+        const data = await body(); return json(200, await registry.approve(data.id));
+      }
       if (req.method === 'POST' && url.pathname === '/api/revoke') {
         const data = await body(); return json(200, await registry.revoke(data.id));
       }

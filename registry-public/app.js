@@ -14,10 +14,14 @@ function render() {
   for (const device of devices.filter(d => `${d.id} ${d.hostname}`.toLowerCase().includes(search))) {
     const row = document.createElement('li');
     const label = document.createElement('span');
-    label.textContent = `${device.id} · ${device.platform} · ${device.revoked ? 'Revoked' : device.online ? 'Online' : 'Offline'} · Last seen ${new Date(device.lastSeen).toLocaleString()}`;
+    label.textContent = `${device.id} · ${device.platform} · ${device.revoked ? 'Revoked' : !device.approved ? 'Pending approval' : device.online ? 'Online' : 'Offline'} · Last seen ${new Date(device.lastSeen).toLocaleString()}`;
     const revoke = document.createElement('button'); revoke.className = 'danger'; revoke.textContent = 'Revoke'; revoke.disabled = device.revoked;
     revoke.onclick = () => execute(async () => { if (confirm(`Revoke inventory access for ${device.id}?`)) { await api('/api/revoke', { id: device.id }); await refresh(); } });
-    row.append(label, revoke); $('devices').append(row);
+    const approve = document.createElement('button'); approve.textContent = 'Approve';
+    approve.hidden = device.approved || device.revoked;
+    approve.onclick = () => execute(async () => { await api('/api/approve', { id: device.id }); await refresh(); });
+    const actions = document.createElement('div'); actions.className = 'row'; actions.append(approve, revoke);
+    row.append(label, actions); $('devices').append(row);
   }
   if (!$('devices').children.length) $('devices').textContent = 'No matching computers.';
 }

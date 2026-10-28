@@ -7,9 +7,13 @@ someone else's desktop. Requires Node.js 22 or newer. No third-party dependencie
 ## Central company device inventory
 
 A separate management server assigns IDs like `WORK-PC-1A2B3C4D5E6F`. IDs are
-public identifiers, not passwords. Administrators sign in once; enrolled devices
+public identifiers, not passwords. Agents send their PC name on first startup; the server assigns a unique ID, even
+when several PCs have the same name. Administrators sign in once; enrolled devices
 keep a server-issued credential locally, without manually copying access tokens.
-The dashboard supports search, online/offline status, and device revocation.
+The dashboard supports search, pending-device approval, online/offline status, and
+device revocation. New agents register automatically without an enrollment code.
+Verify pending PCs against your IT deployment records before approving them: a
+self-reported computer name is not proof of ownership.
 
 This is **inventory only**: hostname, OS, enrollment time, and heartbeat time.
 It does not collect employee screen contents, files, application usage, or browsing
@@ -29,8 +33,11 @@ $env:RC_MANAGEMENT_LOCAL_HTTP = '1'
 npm run management
 ```
 
-Open the management dashboard locally on port 4320. Sign in and select **Create
-enrollment code**. Each code enrolls one PC and expires after 10 minutes.
+Open the management dashboard locally on port 4320 and sign in. New PCs appear
+as **Pending approval**; verify each device ID and select **Approve**. Optionally,
+select **Create enrollment code** to preapprove one PC; the code expires after
+10 minutes. Automatic registration attempts are limited to 10 per minute per
+source IP in this prototype.
 For remote deployment, put the server behind HTTPS on your private network, leave
 RC_MANAGEMENT_LOCAL_HTTP unset (secure cookies), and configure exact
 RC_MANAGEMENT_HOSTS and RC_MANAGEMENT_ORIGINS for the external HTTPS address.
@@ -44,12 +51,14 @@ In a separate PowerShell terminal on the PC being enrolled:
 ```powershell
 # Use your management server's HTTPS origin on remote PCs.
 $env:RC_SERVER_URL = 'http://127.0.0.1:4320'
-$env:RC_ENROLLMENT_CODE = Read-Host 'One-use enrollment code'
 npm run device
 ```
 
-The server assigns the ID; restarting `npm run device` retains it and does not
-need another code. Heartbeats run every 30 seconds; a PC is considered offline
+On first launch the agent sends its PC name and operating system, receives the
+server-assigned ID, and saves it locally. No manual token or enrollment code is
+required. The PC appears as pending until an administrator approves it. Restarting
+`npm run device` retains the same ID and approval status. Set RC_ENROLLMENT_CODE
+only if you want to use the optional preapproved enrollment flow. Heartbeats run every 30 seconds; a PC is considered offline
 after 90 seconds without one. Revocation rejects future heartbeats. Stop the
 visible client with Ctrl+C. No background installation or concealment is added.
 

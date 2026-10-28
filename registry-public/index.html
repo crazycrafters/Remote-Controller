@@ -2,7 +2,7 @@
 <header><div><span class="eyebrow">COMPANY DEVICE INVENTORY</span><h1>Device Management</h1></div><button id="logout" hidden>Sign out</button></header>
 <section id="login"><form id="signin"><h2>Administrator sign-in</h2><label for="password">Administrator password</label><div class="row"><input id="password" type="password" autocomplete="current-password" required><button>Sign in</button></div></form></section>
 <p id="message" role="alert"></p>
-<div id="workspace" hidden><section><h2>Enroll a computer</h2><p>Create a one-use code, valid for 10 minutes. Use it when starting the visible device inventory agent on a company PC.</p><button id="invite">Create enrollment code</button><p id="code"></p></section>
+<div id="workspace" hidden><section><h2>Automatic device registration</h2><p>Start the agent with this server address. It receives a unique PC-name ID automatically and appears below for approval. Verify the device with your IT deployment records before approving it. Optionally create a one-use code for a preapproved enrollment.</p><button id="invite">Create enrollment code</button><p id="code"></p></section>
 <section><div class="section-title"><h2>Company computers</h2><button id="refresh" class="secondary">Refresh</button></div><label for="search">Search by device ID or PC name</label><input id="search" placeholder="Search devices"><ul id="devices"></ul></section></div>
 <footer>Inventory only: computer name, operating system, and online status. No employee activity monitoring.</footer>
 </main></body></html>

@@ -33,8 +33,9 @@ export async function createRegistry(directory) {
       return { code, expires };
     },
     async enroll(code, info) {
+      const hasCode = code !== undefined && code !== null && code !== '';
       const expires = invites.get(code);
-      if (!expires || expires < Date.now()) throw fail(403, 'Enrollment code is invalid or expired');
+      if (hasCode && (!expires || expires < Date.now())) throw fail(403, 'Enrollment code is invalid or expired');
       if (!info || typeof info.hostname !== 'string' || info.hostname.length > 255 || !info.hostname || !['win32', 'linux', 'darwin'].includes(info.platform)) throw fail(400, 'Invalid device details');
       invites.delete(code);
       const credential = randomBytes(32).toString('hex');
@@ -42,8 +43,8 @@ export async function createRegistry(directory) {
         const prefix = info.hostname.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 40) || 'PC';
         let id;
         do { id = `${prefix}-${randomBytes(6).toString('hex').toUpperCase()}`; } while (next.some(d => d.id === id));
-        next.push({ id, hostname: info.hostname, platform: info.platform, credentialHash: digest(credential), enrolledAt: Date.now(), lastSeen: Date.now(), revoked: false });
-        return { id, credential };
+        next.push({ id, hostname: info.hostname, platform: info.platform, credentialHash: digest(credential), enrolledAt: Date.now(), lastSeen: Date.now(), revoked: false, approved: hasCode });
+        return { id, credential, status: hasCode ? 'registered' : 'pending' };
       });
       return result;
     },
@@ -54,11 +55,20 @@ export async function createRegistry(directory) {
         const device = next.find(d => d.id === id && !d.revoked);
         if (!device || !timingSafeEqual(Buffer.from(candidate), Buffer.from(device.credentialHash))) throw fail(401, 'Device authentication failed');
         device.lastSeen = Date.now();
-        return { id: device.id, status: 'registered' };
+        return { id: device.id, status: device.approved === false ? 'pending' : 'registered' };
       });
     },
     list() {
-      return devices.map(({ credentialHash, ...device }) => ({ ...device, online: !device.revoked && Date.now() - device.lastSeen < 90_000 }));
+      return devices.map(({ credentialHash, ...device }) => ({ ...device, approved: device.approved !== false, online: !device.revoked && Date.now() - device.lastSeen < 90_000 }));
+    },
+    approve(id) {
+      return transaction(next => {
+        const device = next.find(d => d.id === id);
+        if (!device) throw fail(404, 'Device not found');
+        if (device.revoked) throw fail(409, 'Cannot approve a revoked device');
+        device.approved = true;
+        return { status: 'registered' };
+      });
     },
     revoke(id) {
       return transaction(next => {

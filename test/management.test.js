@@ -61,10 +61,9 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   assert.equal(login.status, 200);
   const cookie = login.headers.get('set-cookie').split(';')[0];
   assert.match(login.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
-  const invite = await (await post('/api/invites', {}, cookie)).json();
-  const options = { server: base, directory: path.join(directory, 'device'), code: invite.code };
+  const options = { server: base, directory: path.join(directory, 'device') };
   const device = await connectDevice(options);
-  await device.heartbeat();
+  assert.equal((await device.heartbeat()).status, 'pending');
   const restarted = await connectDevice({ ...options, code: undefined });
   assert.equal(restarted.id, device.id);
   await restarted.heartbeat();
@@ -72,8 +71,13 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   assert.equal(devices.devices.length, 1);
   assert.equal(devices.devices[0].id, device.id);
   assert.equal(devices.devices[0].online, true);
+  assert.equal(devices.devices[0].approved, false);
+  assert.equal((await post('/api/approve', { id: device.id })).status, 401);
+  assert.equal((await post('/api/approve', { id: device.id }, cookie)).status, 200);
+  assert.equal((await restarted.heartbeat()).status, 'registered');
   assert.equal((await post('/api/revoke', { id: device.id }, cookie)).status, 200);
   await assert.rejects(device.heartbeat(), /authentication failed/);
+  assert.equal((await post('/api/approve', { id: device.id }, cookie)).status, 409);
   assert.equal((await post('/api/logout', {}, cookie)).status, 200);
   assert.equal((await fetch(base + '/api/devices', { headers: { Cookie: cookie } })).status, 401);
   assert.equal((await fetch(base + '/', { headers: { Origin: 'https://untrusted.example' } })).status, 403);
@@ -83,4 +87,23 @@ test('device enrollment requires HTTPS outside loopback and disallows embedded c
   assert.equal(managementUrl('https://company.example'), 'https://company.example');
   assert.equal(managementUrl('http://127.0.0.1:4320'), 'http://127.0.0.1:4320');
   for (const url of ['http://company.example', 'https://user:password@company.example', 'https://company.example/path', 'https://company.example?secret=x']) assert.throws(() => managementUrl(url));
+});
+
+
+test('automatic registration gives duplicate PC names distinct persistent IDs pending approval', async t => {
+  const directory = await temporary(t);
+  const registry = await createRegistry(directory);
+  const info = { hostname: 'SAME-PC', platform: 'linux' };
+  const first = await registry.enroll(undefined, info);
+  const second = await registry.enroll(undefined, info);
+  assert.notEqual(first.id, second.id);
+  assert.match(first.id, /^SAME-PC-/);
+  assert.equal(first.status, 'pending');
+  const restored = await createRegistry(directory);
+  assert.equal((await restored.heartbeat(first.id, first.credential)).status, 'pending');
+  await restored.approve(first.id);
+  const afterRestart = await createRegistry(directory);
+  assert.equal((await afterRestart.heartbeat(first.id, first.credential)).status, 'registered');
+  assert.equal(afterRestart.list().find(d => d.id === second.id).approved, false);
+  await assert.rejects(registry.enroll('invalid-code', info), { status: 403 });
 });
