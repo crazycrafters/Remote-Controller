@@ -3,13 +3,19 @@ import { readFile } from 'node:fs/promises';
 import { randomBytes, scryptSync, timingSafeEqual, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRegistry } from './registry.js';
+import { createPresence } from './presence.js';
 import { createCommands } from './commands.js';
 
 export async function createManagementServer({ directory, password, hosts, origins, secureCookies = true, testNoAuth = false }) {
   if (!testNoAuth && (typeof password !== 'string' || password.length < 12)) throw new Error('Set RC_ADMIN_PASSWORD to at least 12 characters');
   const registry = await createRegistry(directory);
   const commands = createCommands();
-  const connections = new Map();
+  const disconnected = new Set();
+  const persistedHeartbeats = new Map();
+  const subscribers = new Set();
+  const snapshot = () => registry.list().map(device => ({ ...device, connected: !device.revoked && presence.connected(device.id) }));
+  const publish = () => { const data = `event: devices\ndata: ${JSON.stringify({ devices: snapshot() })}\n\n`; for (const response of subscribers) if (!response.destroyed) response.write(data); };
+  const presence = createPresence({ changed: publish });
   const salt = randomBytes(16);
   const passwordHash = testNoAuth ? null : scryptSync(password, salt, 32);
   const sessions = new Map();
@@ -78,17 +84,23 @@ export async function createManagementServer({ directory, password, hosts, origi
           bucket.count++; enrollments.set(ip, bucket);
         }
         const assigned = await registry.enroll(data.code, data.device, data.previous);
-        commands.disconnect(assigned.id); connections.delete(assigned.id);
-        if (data.previous?.id && data.previous.id !== assigned.id) { commands.disconnect(data.previous.id); connections.delete(data.previous.id); }
+        commands.disconnect(assigned.id); presence.disconnect(assigned.id); disconnected.delete(assigned.id);
+        if (data.previous?.id && data.previous.id !== assigned.id) { commands.disconnect(data.previous.id); presence.disconnect(data.previous.id); }
         return json(201, assigned);
       }
       if (req.method === 'POST' && url.pathname === '/api/heartbeat') {
         const data = await body();
         const credential = req.headers.authorization?.replace(/^Bearer /, '');
-        try { return json(200, await registry.heartbeat(data.id, credential)); }
+        try {
+          registry.authenticate(data.id, credential);
+          const result = { id: data.id, status: 'registered', disconnected: disconnected.has(data.id) };
+          if (Date.now() - (persistedHeartbeats.get(data.id) || 0) >= 30_000) { await registry.heartbeat(data.id, credential); persistedHeartbeats.set(data.id, Date.now()); }
+          if (!disconnected.has(data.id)) presence.touch(data.id);
+          return json(200, result);
+        }
         catch (error) { recordFailure(`device:${ip}`); throw error; }
       }
-      if (req.method === 'POST' && ['/api/device/poll', '/api/device/result'].includes(url.pathname)) {
+      if (req.method === 'POST' && ['/api/device/poll', '/api/device/result', '/api/device/disconnect'].includes(url.pathname)) {
         const credential = req.headers.authorization?.replace(/^Bearer /, '');
         let device;
         try { device = registry.authenticate(req.headers['x-device-id'], credential); }
@@ -96,15 +108,17 @@ export async function createManagementServer({ directory, password, hosts, origi
         if (device.approved === false) return json(403, { error: 'Device not approved' });
         const data = await body(url.pathname.endsWith('/result') ? 12 * 1024 * 1024 : 4096);
         if (data.id !== device.id) return json(403, { error: 'Device identity mismatch' });
+        if (url.pathname.endsWith('/disconnect')) { presence.disconnect(device.id); commands.disconnect(device.id); return json(200, { status: 'disconnected' }); }
+        if (disconnected.has(device.id)) return json(200, { disconnected: true });
         if (url.pathname.endsWith('/poll')) {
-          connections.set(device.id, Date.now());
+          presence.touch(device.id);
           const controller = new AbortController();
           const cancel = () => controller.abort();
           res.once('close', cancel);
           try {
             const command = await commands.wait(device.id, controller.signal);
-            connections.set(device.id, Date.now());
-            return json(200, { command });
+            if (controller.signal.aborted) presence.disconnect(device.id);
+            return json(200, { command, disconnected: disconnected.has(device.id) });
           } finally { res.off('close', cancel); }
         }
         commands.finish(device.id, data.commandId, data.result, data.error);
@@ -117,22 +131,32 @@ export async function createManagementServer({ directory, password, hosts, origi
         res.setHeader('Set-Cookie', 'rc_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
         return json(200, { status: 'signed-out' });
       }
-      if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: registry.list().map(device => ({ ...device, connected: !device.revoked && Date.now() - (connections.get(device.id) || 0) < 45_000 })) });
+      if (req.method === 'GET' && url.pathname === '/api/events') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+        subscribers.add(res); res.write(`event: devices\ndata: ${JSON.stringify({ devices: snapshot() })}\n\n`);
+        const keepAlive = setInterval(() => {
+          if (!testNoAuth && !sessions.has(session)) { res.end(); return; }
+          res.write(': keepalive\n\n');
+        }, 15_000);
+        res.once('close', () => { clearInterval(keepAlive); subscribers.delete(res); });
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: snapshot() });
       if (req.method === 'POST' && url.pathname === '/api/control') {
         const data = await body();
         const device = registry.list().find(device => device.id === data.id && !device.revoked && device.approved);
-        if (!device || Date.now() - (connections.get(device.id) || 0) >= 45_000) return json(409, { error: 'Agent is not connected; start it and refresh devices' });
+        if (!device || !presence.connected(device.id)) return json(409, { error: 'Agent is not connected; start it and refresh devices' });
         return json(200, await commands.submit(device.id, data.operation, data.args));
       }
       if (req.method === 'POST' && url.pathname === '/api/invites') return json(201, registry.invite());
       if (req.method === 'POST' && url.pathname === '/api/approve') {
         const data = await body(); return json(200, await registry.approve(data.id));
       }
-      if (req.method === 'POST' && url.pathname === '/api/revoke') {
+      if (req.method === 'POST' && ['/api/revoke', '/api/disconnect'].includes(url.pathname)) {
         const data = await body();
-        const result = await registry.revoke(data.id);
-        commands.disconnect(data.id); connections.delete(data.id);
-        return json(200, result);
+        if (!registry.list().some(device => device.id === data.id)) return json(404, { error: 'Device not found' });
+        disconnected.add(data.id); commands.disconnect(data.id); presence.disconnect(data.id);
+        return json(200, { status: 'disconnected' });
       }
       json(404, { error: 'Not found' });
     } catch (error) {
@@ -149,7 +173,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       json(error.status || 500, { error: error.status ? error.message : storageErrors[error.code] || `Server could not complete this request. Reference: ${requestId}`, requestId });
     }
   });
-  server.on('close', () => commands.close());
+  server.on('close', () => { commands.close(); presence.close(); for (const response of subscribers) response.end(); subscribers.clear(); });
   return server;
 }
 

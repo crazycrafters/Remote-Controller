@@ -47,7 +47,7 @@ export function createControls({ api, message }) {
       actions.append(button('Close', () => close(false)), button('Force stop', () => close(true), 'danger'));
       row.append(label, actions); $('remote-apps').append(row);
     }
-    if (!result.applications.length) $('remote-apps').textContent = 'No allowlisted applications are running. Configure RC_ALLOWED_APPS on the agent.';
+    if (!result.applications.length) $('remote-apps').textContent = 'No accessible applications are running.';
   }
   $('remote-computer').onclick = () => work(() => files(''));
   $('remote-up').onclick = () => work(() => parent === null ? undefined : files(parent));

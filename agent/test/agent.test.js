@@ -85,6 +85,16 @@ test('native process adapter finds and terminates a real disposable process', { 
 });
 
 test('disabled application controls do not invoke an unavailable OS process utility', async () => {
-  const agent = await createAgent({ root: tmpdir(), processes: async () => { throw new Error('Unavailable process utility'); } });
+  const agent = await createAgent({ root: tmpdir(), allowedApps: [], processes: async () => { throw new Error('Unavailable process utility'); } });
   assert.deepEqual(await agent.applications(), []);
+});
+
+
+test('applications work without an allowlist or manual application credentials', async () => {
+  const closed = [];
+  const agent = await createAgent({ root: tmpdir(), processes: async () => [{ pid: 112233, name: 'editor' }, { pid: process.pid, name: 'agent' }], close: async (...args) => closed.push(args) });
+  const [application] = await agent.applications();
+  assert.equal(application.name, 'editor');
+  await agent.stop(application.ticket, false);
+  assert.deepEqual(closed, [[112233, false]]);
 });

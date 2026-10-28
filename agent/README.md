@@ -20,12 +20,11 @@ RC_DEVICE_DATA chooses the persistent identity directory (default:
 `.remote-controller-device` relative to this working directory). Keep it between
 launches. Do not clone populated identities to other PCs. PC names must be unique
 within each OS; duplicate names are rejected instead of replacing a device.
-Returning devices authenticate automatically using saved credentials. Revoked
-identities stay blocked. An OS service/installer is not included yet.
+Returning devices authenticate automatically using saved credentials. Previously disconnected or revoked PCs reconnect using their saved identity. An OS service/installer is not included yet.
 
 Set RC_FILE_MODE=system to browse accessible drives, or RC_FILE_MODE=folder and
-an absolute RC_ROOT for a restricted folder. RC_ALLOWED_APPS is a comma-separated
-list of process names allowed to close. Central downloads are limited to 8 MiB.
+an absolute RC_ROOT for a restricted folder. Applications are manageable without a separate password or allowlist. Optional
+RC_ALLOWED_APPS restricts process names. Central downloads are limited to 8 MiB.
 Only HTTPS is accepted for remote server origins; HTTP is for loopback testing.
 
 `npm run control` retains the legacy direct-control dashboard for compatibility;

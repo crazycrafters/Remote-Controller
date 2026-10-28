@@ -10,7 +10,7 @@ async function temporary(t) {
   return directory;
 }
 
-test('PCname-OS identities persist securely and revocation blocks reconnection', async t => {
+test('PCname-OS identities persist securely and legacy revocation blocks requests until recovery', async t => {
   const directory = await temporary(t);
   const registry = await createRegistry(directory);
   const info = { hostname: 'WORK-PC', platform: 'win32' };
@@ -59,7 +59,9 @@ test('automatic approval rejects name collisions and authenticates returning PCs
   assert.equal(restored.list().length, 1);
   await assert.rejects(restored.enroll(undefined, info, { ...first, credential: '0'.repeat(64) }), { status: 401 });
   await restored.revoke(first.id);
-  await assert.rejects(restored.enroll(undefined, info, first), { status: 401 });
+  const recovered = await restored.enroll(undefined, info, first);
+  assert.equal(recovered.id, first.id);
+  assert.equal(restored.list()[0].revoked, false);
 });
 
 test('legacy IDs migrate on authenticated handshake and hostname changes retain identity', async t => {

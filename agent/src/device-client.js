@@ -15,8 +15,8 @@ export async function connectDevice({ server, directory, code, fetcher = fetch, 
   let identity;
   try { identity = JSON.parse(await readFile(filename, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  async function request(route, data, credential) {
-    const response = await fetcher(server + route, { method: 'POST', redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])]), headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: `Bearer ${credential}`, 'X-Device-Id': identity.id } : {}) }, body: JSON.stringify(data) });
+  async function request(route, data, credential, shutdown = false) {
+    const response = await fetcher(server + route, { method: 'POST', redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(shutdown ? 2000 : 20_000), ...(!shutdown && signal ? [signal] : [])]), headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: `Bearer ${credential}`, 'X-Device-Id': identity.id } : {}) }, body: JSON.stringify(data) });
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(result.error || 'Device request failed'), { status: response.status, requestId: result.requestId });
     return result;
@@ -32,6 +32,7 @@ export async function connectDevice({ server, directory, code, fetcher = fetch, 
   await rename(filename + '.tmp', filename);
   return {
     id: identity.id,
+    disconnect: () => request('/api/device/disconnect', { id: identity.id }, identity.credential, true),
     heartbeat: () => request('/api/heartbeat', { id: identity.id }, identity.credential),
     poll: () => request('/api/device/poll', { id: identity.id }, identity.credential),
     result: (commandId, result, error) => request('/api/device/result', { id: identity.id, commandId, result, error }, identity.credential)

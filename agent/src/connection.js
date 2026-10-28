@@ -3,14 +3,15 @@ import { executeCommand } from './remote-controls.js';
 
 // A long poll and a separate heartbeat continue while bounded workers perform file/process I/O.
 // Only posting the same completed result may be retried; actions themselves are never replayed.
-export async function runConnection({ device, agent, signal, log = console.log, report = console.error, heartbeatMs = 30_000 }) {
+export async function runConnection({ device, agent, signal, log = console.log, report = console.error, heartbeatMs = 2000 }) {
   const lifetime = new AbortController();
   signal = AbortSignal.any([signal, lifetime.signal]);
   const pending = new Set();
+  let disconnectedByAdmin = false;
   const pause = ms => delay(ms, undefined, { signal });
   const heartbeat = (async () => {
     while (!signal.aborted) {
-      try { await device.heartbeat(); }
+      try { const result = await device.heartbeat(); if (result?.disconnected) { disconnectedByAdmin = true; lifetime.abort(); break; } }
       catch (error) { if (!signal.aborted) report(`Heartbeat: ${error.message}`); }
       try { await pause(heartbeatMs); } catch { break; }
     }
@@ -37,7 +38,8 @@ export async function runConnection({ device, agent, signal, log = console.log, 
     while (!signal.aborted) {
       if (pending.size >= 2) { await Promise.race(pending); continue; }
       try {
-        const { command } = await device.poll();
+        const { command, disconnected } = await device.poll();
+        if (disconnected) return 'disconnected';
         if (failures) log('Management connection restored.');
         failures = 0;
         if (command && !signal.aborted) {
@@ -50,5 +52,6 @@ export async function runConnection({ device, agent, signal, log = console.log, 
         try { await pause(Math.min(15_000, 500 * 2 ** Math.min(failures - 1, 5))); } catch { break; }
       }
     }
+    return disconnectedByAdmin ? 'disconnected' : undefined;
   } finally { lifetime.abort(); await Promise.allSettled([heartbeat, ...pending]); }
 }

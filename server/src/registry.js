@@ -41,9 +41,9 @@ export async function createRegistry(directory) {
     queue = pending.catch(() => {});
     return pending;
   }
-  function authenticateIn(rows, id, credential) {
+  function authenticateIn(rows, id, credential, allowRevoked = false) {
     if (typeof credential !== 'string' || credential.length !== 64) throw fail(401, 'Device authentication required');
-    const device = rows.find(d => d.id === id && !d.revoked);
+    const device = rows.find(d => d.id === id && (allowRevoked || !d.revoked));
     if (!device || !timingSafeEqual(Buffer.from(device.credentialAlgorithm === 'sha256' ? digest(credential) : legacyDigest(credential)), Buffer.from(device.credentialHash))) throw fail(401, 'Device authentication failed');
     return device;
   }
@@ -63,10 +63,10 @@ export async function createRegistry(directory) {
       return transaction(next => {
         const existing = next.find(d => d.id === id);
         if (previous) {
-          const device = authenticateIn(next, previous.id, previous.credential);
+          const device = authenticateIn(next, previous.id, previous.credential, true);
           if (existing && existing !== device) throw fail(409, 'PCname-OS already belongs to another PC; give this PC a unique hostname');
           device.id = id; device.hostname = info.hostname; device.platform = info.platform;
-          device.approved = true; device.lastSeen = Date.now();
+          device.revoked = false; device.approved = true; device.lastSeen = Date.now();
           device.credentialHash = digest(previous.credential); device.credentialAlgorithm = 'sha256';
           return { id, credential: previous.credential, status: 'registered' };
         }

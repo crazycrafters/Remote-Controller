@@ -47,8 +47,10 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   assert.equal((await post('/api/approve', { id: device.id }, cookie)).status, 200);
   assert.equal((await restarted.heartbeat()).status, 'registered');
   assert.equal((await post('/api/revoke', { id: device.id }, cookie)).status, 200);
-  await assert.rejects(device.heartbeat(), /authentication failed/);
-  assert.equal((await post('/api/approve', { id: device.id }, cookie)).status, 409);
+  assert.equal((await device.poll()).disconnected, true);
+  const reconnected = await connectDevice(options);
+  assert.equal(reconnected.id, device.id);
+  assert.equal((await reconnected.heartbeat()).status, 'registered');
   assert.equal((await post('/api/logout', {}, cookie)).status, 200);
   assert.equal((await fetch(base + '/api/devices', { headers: { Cookie: cookie } })).status, 401);
   assert.equal((await fetch(base + '/', { headers: { Origin: 'https://untrusted.example' } })).status, 403);
@@ -145,7 +147,7 @@ test('one agent loads .env, auto-connects, serves central file controls, reconne
   const downloaded = await (await control('download', { path: 'sample.bin' })).json();
   assert.deepEqual(Buffer.from(downloaded.data, 'base64'), binary);
   assert.equal((await control('files', { path: '..' })).status, 403);
-  assert.deepEqual((await (await control('applications')).json()).applications, []);
+  assert.ok(Array.isArray((await (await control('applications')).json()).applications));
   assert.equal((await control('shell')).status, 400);
   assert.equal((await control('close', { ticket: 'fake', force: true })).status, 400);
   assert.equal((await control('close', { ticket: 'fake', force: false })).status, 409);
@@ -162,8 +164,13 @@ test('one agent loads .env, auto-connects, serves central file controls, reconne
   const afterServerRestart = await connected();
   assert.equal(afterServerRestart.id, device.id);
   assert.equal((await control('files')).status, 200);
-  await fetch(base + '/api/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id }) });
+  const disconnectedExit = once(second, 'exit');
+  await fetch(base + '/api/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id }) });
   assert.equal((await control('files')).status, 409);
+  await disconnectedExit;
+  const third = start(); await third.ready;
+  const afterDisconnect = await connected(); assert.equal(afterDisconnect.id, device.id);
+  assert.equal((await control('files')).status, 200);
 });
 
 test('storage failures return a specific error and request reference without credential values', async t => {
@@ -183,4 +190,34 @@ test('storage failures return a specific error and request reference without cre
   });
   assert.equal(JSON.parse(logs[0]).code, 'EEXIST');
   assert.ok(!logs[0].includes('Bearer'));
+});
+
+test('server pushes live presence and temporary disconnect allows the same device to reconnect', { timeout: 10_000 }, async t => {
+  const directory = await temporary(t), hosts = [];
+  const server = await createManagementServer({ directory: path.join(directory, 'server'), hosts, origins: [], testNoAuth: true });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const host = `127.0.0.1:${server.address().port}`; hosts.push(host); const base = `http://${host}`;
+  const controller = new AbortController(); t.after(() => controller.abort());
+  const response = await fetch(base + '/api/events', { signal: controller.signal });
+  assert.equal(response.headers.get('content-type'), 'text/event-stream');
+  const reader = response.body.getReader(); let buffer = '';
+  async function snapshot() {
+    while (true) {
+      const end = buffer.indexOf('\n\n');
+      if (end >= 0) { const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2); const line = frame.split('\n').find(line => line.startsWith('data: ')); if (line) return JSON.parse(line.slice(6)).devices; }
+      const { value, done } = await reader.read(); if (done) throw new Error('Presence stream ended'); buffer += new TextDecoder().decode(value);
+    }
+  }
+  assert.deepEqual(await snapshot(), []);
+  const options = { server: base, directory: path.join(directory, 'identity') };
+  const device = await connectDevice(options); await device.heartbeat();
+  assert.equal((await snapshot())[0].connected, true);
+  await fetch(base + '/api/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id }) });
+  assert.equal((await snapshot())[0].connected, false);
+  assert.equal((await device.poll()).disconnected, true);
+  const returning = await connectDevice(options); await returning.heartbeat();
+  const recovered = await snapshot(); assert.equal(recovered[0].connected, true); assert.equal(recovered[0].id, device.id);
+  await returning.disconnect(); assert.equal((await snapshot())[0].connected, false);
+  await reader.cancel(); controller.abort();
 });

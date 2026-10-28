@@ -23,7 +23,7 @@ npm run dev:agent
 
 Open the local server dashboard on port 4320, refresh **Company computers**, and
 select **Manage**. The agent registers and is automatically approved. You can
-browse drives/folders, download files, and manage allowlisted applications from
+browse drives/folders, download files, and manage running applications from
 this single dashboard. No separate agent dashboard or token is required.
 
 Password-free server mode accepts only direct localhost connections. Normal
@@ -37,7 +37,7 @@ Copy `agent/.env.example` to `agent/.env`, then edit:
 ```dotenv
 RC_SERVER_URL=https://YOUR-SERVER-IP:PORT
 RC_FILE_MODE=system
-RC_ALLOWED_APPS=notepad
+RC_ALLOWED_APPS=
 ```
 
 Use an actual HTTPS origin with a trusted certificate for a server on another
@@ -68,7 +68,7 @@ The agent sends its hostname, OS, and `PCname-OS` ID. Examples:
 For a new ID, the server automatically registers and approves the PC and issues a
 credential that the agent stores locally. On later starts, it verifies the saved
 credential and reuses that record. No manual code, token transfer, or approval is
-required. Revoked devices cannot reconnect simply by starting again.
+required. Disconnect is temporary: restarting the agent reconnects with the same saved identity.
 
 **PCname-OS is not inherently unique.** Give company PCs unique hostnames. If a
 different installation claims an existing ID without its credential, registration
@@ -79,7 +79,7 @@ files into disk images shipped to multiple workers.
 Old random IDs migrate to PCname-OS during an authenticated startup handshake.
 Renaming a PC updates its ID using the same saved credential, unless the new name
 collides. Legacy pending devices are automatically approved on authenticated
-reconnection. Existing revocations are preserved.
+reconnection. Previously revoked PCs recover during an authenticated startup using their saved identity.
 
 ## Server deployment
 
@@ -112,9 +112,11 @@ and closing applications. It works behind typical NAT/firewalls without port
 forwarding on employee PCs. It is polling, not a WebSocket or direct server-to-PC
 network connection.
 
-The dashboard shows **Connected** after a recent poll; stale connections become
-unavailable after 45 seconds. Heartbeats run every 30 seconds, with inventory
-presence expiring after 90 seconds. Initial registration retries occur every 5 seconds. Established connections retry
+The dashboard shows **Connected** after a recent poll; a blue dot marks a connected agent and a red dot marks a disconnected agent.
+Status changes are pushed to the dashboard using server-sent events. Heartbeats
+run every 2 seconds; unexpected losses turn red after about 6–7 seconds. Clean
+disconnects update immediately. Registry timestamps persist at most every 30
+seconds to avoid unnecessary disk writes. Initial registration retries occur every 5 seconds. Established connections retry
 with bounded backoff without registering again or replaying actions.
 The server can manage a PC while its agent is running and reachable; a powered-off
 or sleeping PC cannot be controlled. Automatic OS startup/service installation is
@@ -124,8 +126,8 @@ Commands time out after 60 seconds, are not replayed automatically, and do not
 survive a server restart. File/process operations run with two workers, while
 heartbeats and connection handling continue independently. Result delivery can
 retry the same response, but never re-executes an action. A timed-out action may already have started on the PC;
-refresh state before retrying. Revocation rejects future device requests and
-cancels queued commands; it cannot undo an action already executed.
+refresh state before retrying. Disconnect cancels queued commands and asks the agent to stop. It cannot undo
+an action already executed. Restarting the agent reconnects normally.
 
 ## Files and applications
 
@@ -143,8 +145,10 @@ Central downloads are limited to **8 MiB per file** in this MVP and buffered in
 memory. Only regular files are downloaded. Upload, rename, delete, and copying
 between remote folders are not implemented.
 
-RC_ALLOWED_APPS is a comma-separated list of exact process names (Windows: omit
-`.exe`). Empty means no application may be closed. Normal close requests use
+Applications are listed and can be closed without an allowlist or a separate
+credential prompt. Optional RC_ALLOWED_APPS restricts this to a comma-separated
+list of exact process names (Windows: omit `.exe`); leave it blank for normal
+application management. Normal close requests use
 CloseMainWindow on Windows or SIGTERM on POSIX. Force stop requires typed FORCE
 confirmation and uses Stop-Process/SIGKILL. Close requests can lose unsaved data;
 they do not guarantee that the application has exited. Process IDs are rechecked
@@ -225,3 +229,18 @@ that banner instead of repeatedly overwriting operation errors. If the exact
 old message “Management operation failed” still appears, check that the intended
 server process was restarted from the updated MVP checkout and reload the browser.
 The current server returns specific errors or a request reference instead.
+
+## Disconnect and live status
+
+The old **Revoke** button is now **Disconnect**. It turns the device red, cancels
+pending requests, and stops its agent connection without invalidating its identity.
+Restart `npm run dev:agent` (or `npm start` inside `agent/`) to reconnect the same
+PC and turn its dot blue. The old `/api/revoke` endpoint is a compatibility alias
+for temporary disconnect. Previously revoked identities recover on restart only
+when the saved credential matches; knowing a PC name alone does not grant access.
+
+Presence uses server-sent events at `/api/events`. Reverse proxies must disable
+response buffering for that route and allow a long-lived stream. Device requests
+continue to use authenticated long polling. No per-application credentials are
+required; Windows/macOS/Linux permissions still determine which processes the
+agent can list or stop.

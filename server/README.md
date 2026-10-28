@@ -34,7 +34,7 @@ upgrading. Run one server process per registry; it uses a JSON file, not a share
 database. Pending commands are held in memory and expire after 60 seconds.
 
 The server forwards typed file/process commands over agent-initiated long polling.
-Revocation blocks future agent requests and cancels queued commands. Device IDs
+Disconnect stops the current agent session and cancels queued commands; restarting the agent reconnects. Device IDs
 are PCname-OS; collisions without the original credential are rejected. Existing
 random IDs migrate on an authenticated agent startup.
 
