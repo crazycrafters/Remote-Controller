@@ -4,6 +4,50 @@ A Node.js home-computer agent with a browser dashboard. Browse all available dri
 download files, and close explicitly permitted applications without taking over
 someone else's desktop. Requires Node.js 22 or newer. No third-party dependencies.
 
+## Repository layout
+
+```text
+agent/                 # Deploy to each managed PC
+  src/                 # Registration client, file API, filesystem/process adapters
+  public/              # Direct-control dashboard
+  test/                # Agent-only tests
+  package.json
+server/                # Deploy to your management server
+  src/                 # Admin API and device registry
+  public/              # Central admin dashboard
+  test/                # Server-only tests
+  package.json
+test/                  # Cross-package integration tests
+```
+
+Each package runs independently with Node.js 22+ and has no third-party runtime
+dependencies or runtime imports from the other package. You can deploy just
+`agent/` to employee PCs and just `server/` to the management machine. See
+[agent setup](agent/README.md) and [server setup](server/README.md).
+
+| Working directory | Command | Starts |
+|---|---|---|
+| `server/` | `npm start` | Central management server, port 4320 |
+| `agent/` | `npm start` | Device registration and heartbeats |
+| `agent/` | `npm run control` | Direct file/application API and dashboard, port 4310 |
+| Repository root | `npm run management` | Same management server |
+| Repository root | `npm run device` | Same device client |
+| Repository root | `npm start` | Same direct-control API (compatibility alias) |
+
+Root commands below are run from the repository root. npm workspace commands run
+inside their package directory. Consequently, default state directories are now
+`server/.remote-controller-server` and `agent/.remote-controller-device` when using
+these commands. **For an existing installation**, set RC_MANAGEMENT_DATA and
+RC_DEVICE_DATA to the absolute paths of the original state directories before
+starting, so registered PCs keep their IDs. Relative RC_ROOT paths now resolve
+inside `agent/`; use an absolute RC_ROOT to preserve the intended shared folder.
+No state files are moved automatically.
+
+From the root, run `npm ci --ignore-scripts`, `npm run check`, and `npm test` to
+validate both packages and their integration. The lockfile is shared by npm
+workspaces. Each standalone package can run its own checks with `npm run check`
+and `npm test` without installing dependencies.
+
 ## Central company device inventory
 
 A separate management server assigns IDs like `WORK-PC-1A2B3C4D5E6F`. IDs are
@@ -192,12 +236,14 @@ The dashboard needs a manual browser check; no browser automation ran in cloud.
 
 ## Architecture and limits
 
-- `src/server.js`: HTTP boundary, authentication, host/origin validation, assets.
-- `src/agent.js`: application-control policy.
-- `src/filesystem.js`: drive discovery, navigation, file downloads, optional folder restrictions.
-- `src/processes.js`: Windows and POSIX adapters, fixed utility invocations.
-- `public/`: responsive dashboard using browser APIs and safe text rendering.
-- `test/`: isolated integration and policy tests.
+- `agent/src/control-server.js`: direct-control HTTP API and agent dashboard.
+- `agent/src/device-client.js`: automatic registration and heartbeats.
+- `agent/src/agent.js`: application-control policy.
+- `agent/src/filesystem.js`: drive discovery and file access.
+- `agent/src/processes.js`: Windows and POSIX process adapters.
+- `server/src/server.js`: administrator API and management dashboard.
+- `server/src/registry.js`: ID assignment, persistence, and approval policy.
+- `agent/test/`, `server/test/`, `test/`: package and integration tests.
 
 This is a single-device, single-owner prototype. No accounts, pairing service,
 cloud relay, screen sharing, keyboard input, billing, signed installer, bundled

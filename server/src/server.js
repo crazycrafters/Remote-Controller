@@ -11,7 +11,7 @@ export async function createManagementServer({ directory, password, hosts, origi
   const passwordHash = scryptSync(password, salt, 32);
   const sessions = new Map();
   const failures = new Map();
-  const assets = new Map(await Promise.all(['index.html', 'app.js'].map(async name => [name, await readFile(new URL(`../registry-public/${name}`, import.meta.url))])));
+  const assets = new Map(await Promise.all(['index.html', 'app.js'].map(async name => [name, await readFile(new URL(`../public/${name}`, import.meta.url))])));
   assets.set('style.css', await readFile(new URL('../public/style.css', import.meta.url)));
   return http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');

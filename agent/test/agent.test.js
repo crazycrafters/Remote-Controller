@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createAgent } from '../src/agent.js';
-import { createServer } from '../src/server.js';
+import { createServer } from '../src/control-server.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'rc-test-'));

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
 import { createFilesystem, discoverRoots, validateSystemPath } from '../src/filesystem.js';
-import { createServer } from '../src/server.js';
+import { createServer } from '../src/control-server.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'rc-system-'));
