@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "npm run control --workspace=@remote-controller/agent",
+    "start": "npm start --workspace=@remote-controller/agent",
     "device": "npm start --workspace=@remote-controller/agent",
     "management": "npm start --workspace=@remote-controller/server",
     "test": "npm run test --workspaces && npm run test:integration",

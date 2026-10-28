@@ -22,6 +22,8 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   const base = `http://${host}`;
   const post = (route, data, cookie) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(data) });
   assert.equal((await fetch(base + '/api/devices')).status, 401);
+  assert.equal((await post('/api/control', { id: 'PC-Linux', operation: 'files' })).status, 401);
+  assert.equal((await post('/api/device/poll', { id: 'PC-Linux' })).status, 401);
   assert.equal((await post('/api/login', { password: 'wrong' })).status, 401);
   const login = await post('/api/login', { password: 'a-test-admin-password' });
   assert.equal(login.status, 200);
@@ -29,7 +31,7 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   assert.match(login.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
   const options = { server: base, directory: path.join(directory, 'device') };
   const device = await connectDevice(options);
-  assert.equal((await device.heartbeat()).status, 'pending');
+  assert.equal((await device.heartbeat()).status, 'registered');
   const restarted = await connectDevice({ ...options, code: undefined });
   assert.equal(restarted.id, device.id);
   await restarted.heartbeat();
@@ -37,7 +39,7 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   assert.equal(devices.devices.length, 1);
   assert.equal(devices.devices[0].id, device.id);
   assert.equal(devices.devices[0].online, true);
-  assert.equal(devices.devices[0].approved, false);
+  assert.equal(devices.devices[0].approved, true);
   assert.equal((await post('/api/approve', { id: device.id })).status, 401);
   assert.equal((await post('/api/approve', { id: device.id }, cookie)).status, 200);
   assert.equal((await restarted.heartbeat()).status, 'registered');
@@ -78,8 +80,85 @@ test('local test mode opens both dashboards without passwords while preserving o
     assert.equal((await fetch(base + '/api/config', { headers: { Forwarded: 'for=203.0.113.1' } })).status, 403);
   }
   const device = await connectDevice({ server: managementBase, directory: path.join(directory, 'device') });
-  assert.equal((await device.heartbeat()).status, 'pending');
+  assert.equal((await device.heartbeat()).status, 'registered');
   const approve = await fetch(managementBase + '/api/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id }) });
   assert.equal(approve.status, 200);
   assert.equal((await device.heartbeat()).status, 'registered');
+});
+
+test('one agent loads .env, auto-connects, serves central file controls, reconnects, and respects revocation', { timeout: 45_000 }, async t => {
+  const { writeFile, mkdir } = await import('node:fs/promises');
+  const { spawn } = await import('node:child_process');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const directory = await temporary(t);
+  const root = path.join(directory, 'shared'); await mkdir(root);
+  const binary = Buffer.from([0, 1, 2, 255, 128, 10]);
+  await writeFile(path.join(root, 'sample.bin'), binary);
+  const hosts = [];
+  const server = await createManagementServer({ directory: path.join(directory, 'server'), hosts, origins: [], testNoAuth: true });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const host = `127.0.0.1:${server.address().port}`; hosts.push(host);
+  const base = `http://${host}`;
+  await writeFile(path.join(directory, '.env'), `RC_SERVER_URL=${base}\n`);
+  const env = { ...process.env, RC_ROOT: root, RC_FILE_MODE: 'folder', RC_DEVICE_DATA: path.join(directory, 'identity'), RC_ALLOWED_APPS: '' };
+  delete env.RC_SERVER_URL; delete env.RC_ENROLLMENT_CODE;
+  const children = [];
+  async function stop(child) {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = once(child, 'exit'); child.kill(); await exited;
+  }
+  t.after(async () => { for (const child of children) await stop(child); });
+  function start() {
+    const child = spawn(process.execPath, [path.resolve('agent/src/index.js')], { cwd: directory, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Drain output without logging credentials or collecting unlimited agent output.
+    child.ready = new Promise((resolve, reject) => {
+      let text = '';
+      const timer = setTimeout(() => reject(new Error('Agent startup timed out')), 7000);
+      child.stdout.on('data', chunk => { text += chunk; if (text.includes('Connected as ')) { clearTimeout(timer); resolve(); } });
+      child.once('exit', () => { clearTimeout(timer); reject(new Error('Agent exited before connecting')); });
+    });
+    child.stderr.resume(); children.push(child); return child;
+  }
+  async function connected() {
+    const end = Date.now() + 10000;
+    while (Date.now() < end) {
+      const devices = (await (await fetch(base + '/api/devices')).json()).devices;
+      if (devices.length === 1 && devices[0].connected) return devices[0];
+      await delay(50);
+    }
+    throw new Error('Unified agent did not connect');
+  }
+  const first = start(); await first.ready;
+  const device = await connected();
+  assert.match(device.id, /-(Windows|Linux|macOS)$/);
+  assert.equal(device.approved, true);
+  async function control(operation, args = {}) {
+    return fetch(base + '/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id, operation, args }) });
+  }
+  assert.equal((await (await control('roots')).json()).mode, 'folder');
+  const listing = await (await control('files')).json();
+  assert.equal(listing.entries[0].name, 'sample.bin');
+  const downloaded = await (await control('download', { path: 'sample.bin' })).json();
+  assert.deepEqual(Buffer.from(downloaded.data, 'base64'), binary);
+  assert.equal((await control('files', { path: '..' })).status, 403);
+  assert.deepEqual((await (await control('applications')).json()).applications, []);
+  assert.equal((await control('shell')).status, 400);
+  assert.equal((await control('close', { ticket: 'fake', force: true })).status, 400);
+  assert.equal((await control('close', { ticket: 'fake', force: false })).status, 409);
+  await stop(first);
+  // A returning agent must reuse its saved identity and auto-connect without another approval.
+  const second = start(); await second.ready; const returning = await connected(); assert.equal(returning.id, device.id);
+  // Wait for the new process to poll, rather than relying on the previous connection timestamp.
+  assert.equal((await control('files')).status, 200);
+  // The agent must reconnect after a real management-server restart, without restarting the agent.
+  await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+  const replacement = await createManagementServer({ directory: path.join(directory, 'server'), hosts, origins: [], testNoAuth: true });
+  replacement.listen(Number(host.split(':')[1]), '127.0.0.1'); await once(replacement, 'listening');
+  t.after(() => new Promise(resolve => { replacement.close(resolve); replacement.closeAllConnections(); }));
+  const afterServerRestart = await connected();
+  assert.equal(afterServerRestart.id, device.id);
+  assert.equal((await control('files')).status, 200);
+  await fetch(base + '/api/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id }) });
+  assert.equal((await control('files')).status, 409);
 });

@@ -1,7 +1,6 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 export function managementUrl(value) {
   const url = new URL(value);
@@ -17,33 +16,24 @@ export async function connectDevice({ server, directory, code, fetcher = fetch }
   try { identity = JSON.parse(await readFile(filename, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   async function request(route, data, credential) {
-    const response = await fetcher(server + route, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: `Bearer ${credential}` } : {}) }, body: JSON.stringify(data) });
+    const response = await fetcher(server + route, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: `Bearer ${credential}`, 'X-Device-Id': identity.id } : {}) }, body: JSON.stringify(data) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Device request failed');
     return result;
   }
-  if (!identity) {
-    const assigned = await request('/api/enroll', { code, device: { hostname: hostname(), platform: process.platform } });
-    identity = { server, ...assigned };
-    await writeFile(filename, JSON.stringify(identity), { mode: 0o600, flag: 'wx' });
-  }
-  if (identity.server !== server) throw new Error('Device is enrolled to a different server; use a separate data directory');
-  return { id: identity.id, heartbeat: () => request('/api/heartbeat', { id: identity.id }, identity.credential) };
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  console.log('Remote Controller device inventory agent is running visibly. It reports this computer name, operating system, and online status. No screen, file, or application activity is sent to the management server.');
-  const device = await connectDevice({ server: process.env.RC_SERVER_URL || 'http://127.0.0.1:4320', directory: process.env.RC_DEVICE_DATA || '.remote-controller-device', code: process.env.RC_ENROLLMENT_CODE });
-  console.log(`Device ID: ${device.id}. Keep this terminal open. Press Ctrl+C to stop reporting.`);
-  let stopped = false;
-  const stop = () => { stopped = true; clearInterval(timer); };
-  let lastStatus;
-  const report = async () => { try {
-    const result = await device.heartbeat();
-    if (result.status !== lastStatus) console.log(result.status === 'pending' ? 'Awaiting administrator approval.' : 'Device approved and registered.');
-    lastStatus = result.status;
-  } catch (error) { console.error(error.message); } };
-  await report();
-  const timer = setInterval(() => { if (!stopped) void report(); }, 30_000);
-  process.on('SIGINT', stop); process.on('SIGTERM', stop);
+  if (identity && identity.server !== server) throw new Error('Device is enrolled to a different server; use a separate data directory');
+  const device = { hostname: hostname(), platform: process.platform };
+  device.id = `${device.hostname}-${{ win32: 'Windows', linux: 'Linux', darwin: 'macOS' }[device.platform]}`;
+  const assigned = await request('/api/enroll', { code, device, ...(identity ? { previous: { id: identity.id, credential: identity.credential } } : {}) });
+  identity = { server, ...assigned };
+  // Save after each handshake so legacy random IDs migrate and renamed PCs retain their credentials.
+  const { rename } = await import('node:fs/promises');
+  await writeFile(filename + '.tmp', JSON.stringify(identity), { mode: 0o600 });
+  await rename(filename + '.tmp', filename);
+  return {
+    id: identity.id,
+    heartbeat: () => request('/api/heartbeat', { id: identity.id }, identity.credential),
+    poll: () => request('/api/device/poll', { id: identity.id }, identity.credential),
+    result: (commandId, result, error) => request('/api/device/result', { id: identity.id, commandId, result, error }, identity.credential)
+  };
 }

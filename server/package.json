@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/registry.js && node --check public/app.js",
+    "check": "node --check src/server.js && node --check src/registry.js && node --check public/app.js && node --check src/commands.js && node --check public/controls.js",
     "dev": "node src/server.js --test-no-auth"
   }
 }

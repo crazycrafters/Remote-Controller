@@ -1,49 +1,43 @@
-# Remote Controller management server
+# Central management server
 
-## Password-free local testing
+Deploy only this directory to the management machine. Requires Node.js 22+.
+No agent source or third-party runtime dependencies are needed.
 
-From this directory, run `npm run dev` to open the admin dashboard on localhost port 4320
-without entering a password or token. This mode is limited to direct localhost
-connections. For device registration, also run `npm start` in the agent directory
-while the management server is running. See the root README for the three-terminal
-local test walkthrough.
-
-
-Deploy this directory to the administrator's server, not to managed PCs. Requires
-Node.js 22+. No third-party runtime dependencies; the agent directory is not needed
-at runtime. This package owns the admin dashboard, registry, ID assignment,
-approval, and revocation.
-
-For local development, from this directory:
-
-```powershell
-$env:RC_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', (Read-Host 'Administrator password' -AsSecureString)).Password
-$env:RC_MANAGEMENT_LOCAL_HTTP = '1'
-npm start
-```
-
-Open the dashboard locally on port 4320. For remote use, configure an HTTPS reverse
-proxy, leave RC_MANAGEMENT_LOCAL_HTTP unset, and set exact allowed
-RC_MANAGEMENT_HOSTS and RC_MANAGEMENT_ORIGINS. The server binds to loopback by
-default; RC_MANAGEMENT_BIND and RC_MANAGEMENT_PORT override the listener.
-
-RC_MANAGEMENT_DATA selects persistent registry storage (default:
-`.remote-controller-server` under the working directory). Back up this directory.
-Run only one server process against a registry; this prototype uses a JSON file,
-not a shared database. Admin passwords must have at least 12 characters.
-
-Managed PCs register automatically with a PC-name ID and appear as pending.
-Verify each device against your deployment records before approving it. A device
-name is self-reported, not proof of company ownership. Optional one-use enrollment
-codes preapprove registration. This server provides inventory, not central file
-access, screen sharing, or employee activity monitoring.
-
-## Checks
+## Local test, no passwords
 
 ```sh
-npm run check
-npm test
+npm run dev
 ```
 
-Cross-package client/server integration tests run from the repository root with
-`npm run test:integration`.
+In a second terminal, run `npm start` inside `agent/`. Open the server dashboard
+locally on port 4320, refresh devices, and select Manage. The agent registers
+and is automatically approved as PCname-OS; no separate file-control server or
+manual token transfer is needed. Test mode permits only direct localhost access.
+
+## Remote deployment
+
+Run `npm start` with RC_ADMIN_PASSWORD set (at least 12 characters), put the
+listener behind an HTTPS reverse proxy, and configure exact allowed
+RC_MANAGEMENT_HOSTS and RC_MANAGEMENT_ORIGINS. RC_MANAGEMENT_BIND defaults to
+loopback and RC_MANAGEMENT_PORT to 4320. Leave RC_MANAGEMENT_LOCAL_HTTP unset for
+Secure login cookies. An optional `.env` is loaded from the working directory.
+
+Configure the agent's RC_SERVER_URL to this server's trusted HTTPS origin.
+Protect the server with your company's private network/access controls. New IDs
+are auto-approved; a self-reported hostname is not proof of company ownership.
+Admin authentication is still required for network management. The password-free
+dev command is for localhost only.
+
+RC_MANAGEMENT_DATA selects registry storage (default `.remote-controller-server`
+under the working directory). Back up the registry and preserve this path when
+upgrading. Run one server process per registry; it uses a JSON file, not a shared
+database. Pending commands are held in memory and expire after 20 seconds.
+
+The server forwards typed file/process commands over agent-initiated polling.
+Revocation blocks future agent requests and cancels queued commands. Device IDs
+are PCname-OS; collisions without the original credential are rejected. Existing
+random IDs migrate on an authenticated agent startup.
+
+Run `npm run check` and `npm test` here. Cross-package tests run from the
+repository root with `npm run test:integration`. See the root README for limits,
+permissions, identity storage, and the full startup walkthrough.

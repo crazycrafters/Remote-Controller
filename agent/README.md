@@ -1,52 +1,35 @@
-# Remote Controller agent
+# Managed PC agent
 
-## Password-free local testing
+Deploy this directory to each PC. Requires Node.js 22+. No server source or
+third-party runtime dependencies are needed.
 
-From this directory, run `npm run dev` to open the direct file dashboard on localhost port 4310
-without entering a password or token. This mode is limited to direct localhost
-connections. For device registration, also run `npm start` in the agent directory
-while the management server is running. See the root README for the three-terminal
-local test walkthrough.
+1. Copy `.env.example` to `.env` here.
+2. Set RC_SERVER_URL to your management server's HTTPS origin, including its port.
+3. Run `npm start`.
 
+One process registers as PCname-OS, is automatically approved, maintains its
+outbound command channel, and performs authorized file/application requests.
+It retries network failures and reports management operations in its terminal.
+It does not serve a local dashboard or open a listening port by default.
 
-Deploy this directory to each managed PC. Requires Node.js 22+. No third-party
-runtime dependencies; the server directory is not needed on the PC.
+Local development defaults to `http://127.0.0.1:4320`; start `npm run dev` in
+`server/` on the same PC, then `npm start` here. Open the server dashboard on port
+4320 and select Manage. No passwords or manually copied tokens are needed.
 
-From this directory, set the management server origin and start registration:
+RC_DEVICE_DATA chooses the persistent identity directory (default:
+`.remote-controller-device` relative to this working directory). Keep it between
+launches. Do not clone populated identities to other PCs. PC names must be unique
+within each OS; duplicate names are rejected instead of replacing a device.
+Returning devices authenticate automatically using saved credentials. Revoked
+identities stay blocked. An OS service/installer is not included yet.
 
-```powershell
-$env:RC_SERVER_URL = 'https://management.example.com'
-npm start
-```
+Set RC_FILE_MODE=system to browse accessible drives, or RC_FILE_MODE=folder and
+an absolute RC_ROOT for a restricted folder. RC_ALLOWED_APPS is a comma-separated
+list of process names allowed to close. Central downloads are limited to 8 MiB.
+Only HTTPS is accepted for remote server origins; HTTP is for loopback testing.
 
-The agent sends its PC name and OS, receives a server-assigned ID, and saves its
-identity in `.remote-controller-device` under the working directory. The server
-administrator approves it in the dashboard. `RC_DEVICE_DATA` selects a different
-persistent directory. Keep this directory between launches and do not include it
-in a disk image copied to other computers. TLS is required except on loopback.
+`npm run control` retains the legacy direct-control dashboard for compatibility;
+it requires RC_TOKEN and is unnecessary for the central workflow.
 
-For local development, the server origin defaults to `http://127.0.0.1:4320`.
-Optional `RC_ENROLLMENT_CODE` enables preapproved enrollment.
-
-## Direct file and application controls
-
-The existing direct-control API is part of the agent, because it accesses the
-managed PC's filesystem and processes. It is separate from central inventory.
-Start it with:
-
-```powershell
-$env:RC_FILE_MODE = 'system'
-$env:RC_TOKEN = node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-npm run control
-```
-
-This serves its own dashboard on loopback port 4310. See the repository README
-for token access, private VPN configuration, and file/process permissions.
-Inventory registration does not automatically start the direct-control API.
-
-## Checks
-
-```sh
-npm run check
-npm test
-```
+Run `npm run check` and `npm test` here for agent checks. Cross-package integration
+tests run from the repository root. See the root README for deployment details.

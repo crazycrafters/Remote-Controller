@@ -3,17 +3,20 @@ import { readFile } from 'node:fs/promises';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRegistry } from './registry.js';
+import { createCommands } from './commands.js';
 
 export async function createManagementServer({ directory, password, hosts, origins, secureCookies = true, testNoAuth = false }) {
   if (!testNoAuth && (typeof password !== 'string' || password.length < 12)) throw new Error('Set RC_ADMIN_PASSWORD to at least 12 characters');
   const registry = await createRegistry(directory);
+  const commands = createCommands();
+  const connections = new Map();
   const salt = randomBytes(16);
   const passwordHash = testNoAuth ? null : scryptSync(password, salt, 32);
   const sessions = new Map();
   const failures = new Map();
-  const assets = new Map(await Promise.all(['index.html', 'app.js'].map(async name => [name, await readFile(new URL(`../public/${name}`, import.meta.url))])));
+  const assets = new Map(await Promise.all(['index.html', 'app.js', 'controls.js'].map(async name => [name, await readFile(new URL(`../public/${name}`, import.meta.url))])));
   assets.set('style.css', await readFile(new URL('../public/style.css', import.meta.url)));
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -29,7 +32,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       for (const [key, expires] of sessions) if (expires < Date.now()) sessions.delete(key);
       for (const [key, value] of failures) if (value.until < Date.now()) failures.delete(key);
       if (req.method === 'GET' && url.pathname === '/api/config') return json(200, { testNoAuth: Boolean(testNoAuth) });
-      if (req.method === 'GET' && ['/', '/app.js', '/style.css'].includes(url.pathname)) {
+      if (req.method === 'GET' && ['/', '/app.js', '/controls.js', '/style.css'].includes(url.pathname)) {
         const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
         res.writeHead(200, { 'Content-Type': name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.css') ? 'text/css' : 'text/javascript' });
         return res.end(assets.get(name));
@@ -40,13 +43,15 @@ export async function createManagementServer({ directory, password, hosts, origi
         const entry = failures.get(ip) || { count: 0, until: Date.now() + 60_000 };
         entry.count++; failures.set(ip, entry);
       };
-      async function body() {
+      async function body(maxBytes = 4096) {
         if (req.headers['content-type'] !== 'application/json') throw Object.assign(new Error('JSON required'), { status: 415 });
-        let value = '';
+        const chunks = []; let bytes = 0;
         for await (const chunk of req) {
-          value += chunk;
-          if (Buffer.byteLength(value) > 4096) throw Object.assign(new Error('Request too large'), { status: 413 });
+          bytes += chunk.length;
+          if (bytes > maxBytes) throw Object.assign(new Error('Request too large'), { status: 413 });
+          chunks.push(chunk);
         }
+        const value = Buffer.concat(chunks).toString('utf8');
         try { const data = JSON.parse(value); if (!data || Array.isArray(data) || typeof data !== 'object') throw new Error(); return data; }
         catch { throw Object.assign(new Error('Invalid JSON'), { status: 400 }); }
       }
@@ -64,13 +69,31 @@ export async function createManagementServer({ directory, password, hosts, origi
       if (req.method === 'POST' && url.pathname === '/api/enroll') {
         const data = await body();
         recordFailure(); // Bound registration attempts as well as failed authentication.
-        return json(201, await registry.enroll(data.code, data.device));
+        const assigned = await registry.enroll(data.code, data.device, data.previous);
+        commands.disconnect(assigned.id); connections.delete(assigned.id);
+        if (data.previous?.id && data.previous.id !== assigned.id) { commands.disconnect(data.previous.id); connections.delete(data.previous.id); }
+        return json(201, assigned);
       }
       if (req.method === 'POST' && url.pathname === '/api/heartbeat') {
         const data = await body();
         const credential = req.headers.authorization?.replace(/^Bearer /, '');
         try { return json(200, await registry.heartbeat(data.id, credential)); }
         catch (error) { recordFailure(); throw error; }
+      }
+      if (req.method === 'POST' && ['/api/device/poll', '/api/device/result'].includes(url.pathname)) {
+        const credential = req.headers.authorization?.replace(/^Bearer /, '');
+        let device;
+        try { device = registry.authenticate(req.headers['x-device-id'], credential); }
+        catch (error) { recordFailure(); throw error; }
+        if (device.approved === false) return json(403, { error: 'Device not approved' });
+        const data = await body(url.pathname.endsWith('/result') ? 12 * 1024 * 1024 : 4096);
+        if (data.id !== device.id) return json(403, { error: 'Device identity mismatch' });
+        if (url.pathname.endsWith('/poll')) {
+          connections.set(device.id, Date.now());
+          return json(200, { command: commands.next(device.id) });
+        }
+        commands.finish(device.id, data.commandId, data.result, data.error);
+        return json(200, { status: 'received' });
       }
       const session = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('rc_admin='))?.slice(9);
       if (!testNoAuth && !sessions.has(session)) return json(401, { error: 'Administrator sign-in required' });
@@ -79,20 +102,32 @@ export async function createManagementServer({ directory, password, hosts, origi
         res.setHeader('Set-Cookie', 'rc_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
         return json(200, { status: 'signed-out' });
       }
-      if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: registry.list() });
+      if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: registry.list().map(device => ({ ...device, connected: !device.revoked && Date.now() - (connections.get(device.id) || 0) < 10_000 })) });
+      if (req.method === 'POST' && url.pathname === '/api/control') {
+        const data = await body();
+        const device = registry.list().find(device => device.id === data.id && !device.revoked && device.approved);
+        if (!device || Date.now() - (connections.get(device.id) || 0) >= 10_000) return json(409, { error: 'Agent is not connected; start it and refresh devices' });
+        return json(200, await commands.submit(device.id, data.operation, data.args));
+      }
       if (req.method === 'POST' && url.pathname === '/api/invites') return json(201, registry.invite());
       if (req.method === 'POST' && url.pathname === '/api/approve') {
         const data = await body(); return json(200, await registry.approve(data.id));
       }
       if (req.method === 'POST' && url.pathname === '/api/revoke') {
-        const data = await body(); return json(200, await registry.revoke(data.id));
+        const data = await body();
+        const result = await registry.revoke(data.id);
+        commands.disconnect(data.id); connections.delete(data.id);
+        return json(200, result);
       }
       json(404, { error: 'Not found' });
     } catch (error) { json(error.status || 500, { error: error.status ? error.message : 'Management operation failed' }); }
   });
+  server.on('close', () => commands.close());
+  return server;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try { process.loadEnvFile('.env'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const testNoAuth = process.argv.includes('--test-no-auth');
   const port = Number(process.env.RC_MANAGEMENT_PORT || 4320);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid management port');

@@ -1,22 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createRegistry } from '../src/registry.js';
+import { createRegistry, deviceId } from '../src/registry.js';
 async function temporary(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'rc-registry-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
 
-test('server assigns unique IDs, hashes credentials, persists identities, and revokes devices', async t => {
+test('PCname-OS identities persist securely and revocation blocks reconnection', async t => {
   const directory = await temporary(t);
   const registry = await createRegistry(directory);
   const info = { hostname: 'WORK-PC', platform: 'win32' };
   const first = await registry.enroll(registry.invite().code, info);
-  const second = await registry.enroll(registry.invite().code, info);
-  assert.match(first.id, /^WORK-PC-[A-F0-9]{12}$/);
+  const second = await registry.enroll(undefined, { ...info, hostname: 'SECOND-PC' });
+  assert.equal(first.id, 'WORK-PC-Windows');
   assert.notEqual(first.id, second.id);
   const raw = await readFile(path.join(directory, 'devices.json'), 'utf8');
   assert.ok(!raw.includes(first.credential));
@@ -43,20 +43,40 @@ test('enrollment invitations expire and are single-use even under concurrent att
   } finally { Date.now = original; }
 });
 
-test('automatic registration gives duplicate PC names distinct persistent IDs pending approval', async t => {
+test('automatic approval rejects name collisions and authenticates returning PCs', async t => {
   const directory = await temporary(t);
   const registry = await createRegistry(directory);
   const info = { hostname: 'SAME-PC', platform: 'linux' };
   const first = await registry.enroll(undefined, info);
-  const second = await registry.enroll(undefined, info);
-  assert.notEqual(first.id, second.id);
-  assert.match(first.id, /^SAME-PC-/);
-  assert.equal(first.status, 'pending');
+  assert.equal(first.id, 'SAME-PC-Linux');
+  assert.equal(first.status, 'registered');
+  assert.equal(registry.list()[0].approved, true);
+  await assert.rejects(registry.enroll(undefined, info), { status: 409 });
   const restored = await createRegistry(directory);
-  assert.equal((await restored.heartbeat(first.id, first.credential)).status, 'pending');
-  await restored.approve(first.id);
-  const afterRestart = await createRegistry(directory);
-  assert.equal((await afterRestart.heartbeat(first.id, first.credential)).status, 'registered');
-  assert.equal(afterRestart.list().find(d => d.id === second.id).approved, false);
-  await assert.rejects(registry.enroll('invalid-code', info), { status: 403 });
+  const returning = await restored.enroll(undefined, info, first);
+  assert.equal(returning.id, first.id);
+  assert.equal(returning.credential, first.credential);
+  assert.equal(restored.list().length, 1);
+  await assert.rejects(restored.enroll(undefined, info, { ...first, credential: '0'.repeat(64) }), { status: 401 });
+  await restored.revoke(first.id);
+  await assert.rejects(restored.enroll(undefined, info, first), { status: 401 });
+});
+
+test('legacy IDs migrate on authenticated handshake and hostname changes retain identity', async t => {
+  const directory = await temporary(t);
+  const registry = await createRegistry(directory);
+  const info = { hostname: 'PC', platform: 'darwin' };
+  const original = await registry.enroll(undefined, info);
+  const filename = path.join(directory, 'devices.json');
+  const records = JSON.parse(await readFile(filename, 'utf8'));
+  records[0].id = 'PC-OLD-RANDOM-ID'; records[0].approved = false;
+  await writeFile(filename, JSON.stringify(records));
+  const restored = await createRegistry(directory);
+  const migrated = await restored.enroll(undefined, info, { ...original, id: records[0].id });
+  assert.equal(migrated.id, 'PC-macOS');
+  const renamed = await restored.enroll(undefined, { ...info, hostname: 'RENAMED' }, migrated);
+  assert.equal(renamed.id, 'RENAMED-macOS');
+  assert.equal(restored.list().length, 1);
+  assert.equal(deviceId({ hostname: 'PC', platform: 'win32' }), 'PC-Windows');
+  assert.throws(() => deviceId({ hostname: '../PC', platform: 'linux' }), { status: 400 });
 });
