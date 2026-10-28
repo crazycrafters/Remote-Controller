@@ -8,7 +8,7 @@ export function managementUrl(value) {
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new Error('Management requires HTTPS, except on loopback for development');
   return url.origin;
 }
-export async function connectDevice({ server, directory, code, fetcher = fetch }) {
+export async function connectDevice({ server, directory, code, fetcher = fetch, signal }) {
   server = managementUrl(server);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const filename = path.join(directory, 'identity.json');
@@ -16,9 +16,9 @@ export async function connectDevice({ server, directory, code, fetcher = fetch }
   try { identity = JSON.parse(await readFile(filename, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   async function request(route, data, credential) {
-    const response = await fetcher(server + route, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: `Bearer ${credential}`, 'X-Device-Id': identity.id } : {}) }, body: JSON.stringify(data) });
+    const response = await fetcher(server + route, { method: 'POST', redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])]), headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: `Bearer ${credential}`, 'X-Device-Id': identity.id } : {}) }, body: JSON.stringify(data) });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Device request failed');
+    if (!response.ok) throw Object.assign(new Error(result.error || 'Device request failed'), { status: response.status, requestId: result.requestId });
     return result;
   }
   if (identity && identity.server !== server) throw new Error('Device is enrolled to a different server; use a separate data directory');

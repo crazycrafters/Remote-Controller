@@ -1,8 +1,11 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
+import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
-const digest = value => scryptSync(value, 'remote-controller-device-credential-v1', 32).toString('hex');
+const legacyDigest = value => scryptSync(value, 'remote-controller-device-credential-v1', 32).toString('hex');
+// Device credentials have 256 bits of random entropy: SHA-256 is sufficient here.
+// Passwords still use scrypt; existing device hashes migrate after authentication.
+const digest = value => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => Object.assign(new Error(message), { status });
 export function deviceId(info) {
   if (!info || typeof info.hostname !== 'string' || !/^[a-zA-Z0-9_.-]{1,255}$/.test(info.hostname) || !['win32', 'linux', 'darwin'].includes(info.platform)) throw fail(400, 'Invalid device details');
@@ -20,8 +23,18 @@ export async function createRegistry(directory) {
     const pending = queue.then(async () => {
       const next = structuredClone(devices);
       const result = fn(next);
-      await writeFile(filename + '.tmp', JSON.stringify(next), { mode: 0o600 });
-      await rename(filename + '.tmp', filename);
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const temporary = `${filename}.${randomBytes(8).toString('hex')}.tmp`;
+      try {
+        await writeFile(temporary, JSON.stringify(next), { mode: 0o600, flag: 'wx' });
+        for (let attempt = 0; ; attempt++) {
+          try { await rename(temporary, filename); break; }
+          catch (error) {
+            if (!['EPERM', 'EBUSY', 'EACCES'].includes(error.code) || attempt >= 3) throw error;
+            await new Promise(resolve => setTimeout(resolve, 50 * 2 ** attempt));
+          }
+        }
+      } finally { await rm(temporary, { force: true }).catch(() => {}); }
       devices = next;
       return result;
     });
@@ -31,7 +44,7 @@ export async function createRegistry(directory) {
   function authenticateIn(rows, id, credential) {
     if (typeof credential !== 'string' || credential.length !== 64) throw fail(401, 'Device authentication required');
     const device = rows.find(d => d.id === id && !d.revoked);
-    if (!device || !timingSafeEqual(Buffer.from(digest(credential)), Buffer.from(device.credentialHash))) throw fail(401, 'Device authentication failed');
+    if (!device || !timingSafeEqual(Buffer.from(device.credentialAlgorithm === 'sha256' ? digest(credential) : legacyDigest(credential)), Buffer.from(device.credentialHash))) throw fail(401, 'Device authentication failed');
     return device;
   }
   return {
@@ -54,16 +67,17 @@ export async function createRegistry(directory) {
           if (existing && existing !== device) throw fail(409, 'PCname-OS already belongs to another PC; give this PC a unique hostname');
           device.id = id; device.hostname = info.hostname; device.platform = info.platform;
           device.approved = true; device.lastSeen = Date.now();
+          device.credentialHash = digest(previous.credential); device.credentialAlgorithm = 'sha256';
           return { id, credential: previous.credential, status: 'registered' };
         }
         if (existing) throw fail(409, 'PCname-OS already exists; restore this PC identity file or use a unique hostname');
         const credential = randomBytes(32).toString('hex');
-        next.push({ id, hostname: info.hostname, platform: info.platform, credentialHash: digest(credential), enrolledAt: Date.now(), lastSeen: Date.now(), revoked: false, approved: true });
+        next.push({ id, hostname: info.hostname, platform: info.platform, credentialHash: digest(credential), credentialAlgorithm: 'sha256', enrolledAt: Date.now(), lastSeen: Date.now(), revoked: false, approved: true });
         return { id, credential, status: 'registered' };
       });
     },
     authenticate(id, credential) {
-      const { credentialHash, ...device } = authenticateIn(devices, id, credential);
+      const { credentialHash, credentialAlgorithm, ...device } = authenticateIn(devices, id, credential);
       return device;
     },
     heartbeat(id, credential) {
@@ -74,7 +88,7 @@ export async function createRegistry(directory) {
       });
     },
     list() {
-      return devices.map(({ credentialHash, ...device }) => ({ ...device, approved: device.approved !== false, online: !device.revoked && Date.now() - device.lastSeen < 90_000 }));
+      return devices.map(({ credentialHash, credentialAlgorithm, ...device }) => ({ ...device, approved: device.approved !== false, online: !device.revoked && Date.now() - device.lastSeen < 90_000 }));
     },
     approve(id) {
       return transaction(next => {

@@ -31,9 +31,9 @@ dev command is for localhost only.
 RC_MANAGEMENT_DATA selects registry storage (default `.remote-controller-server`
 under the working directory). Back up the registry and preserve this path when
 upgrading. Run one server process per registry; it uses a JSON file, not a shared
-database. Pending commands are held in memory and expire after 20 seconds.
+database. Pending commands are held in memory and expire after 60 seconds.
 
-The server forwards typed file/process commands over agent-initiated polling.
+The server forwards typed file/process commands over agent-initiated long polling.
 Revocation blocks future agent requests and cancels queued commands. Device IDs
 are PCname-OS; collisions without the original credential are rejected. Existing
 random IDs migrate on an authenticated agent startup.

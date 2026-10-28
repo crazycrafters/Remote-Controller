@@ -23,3 +23,19 @@ test('queued commands expire, reject on revocation, and are not replayed', async
   commands.disconnect('PC'); await rejected;
   assert.equal(commands.next('PC'), null);
 });
+
+test('long polling delivers a new command immediately and abort cleans up the waiter', async t => {
+  const commands = createCommands({ pollTimeout: 1000 }); t.after(() => commands.close());
+  const waiting = commands.wait('PC');
+  const completed = commands.submit('PC', 'files');
+  const command = await waiting;
+  assert.equal(command.operation, 'files');
+  commands.finish('PC', command.id, { entries: [] }); await completed;
+  const controller = new AbortController();
+  const canceled = commands.wait('PC', controller.signal);
+  assert.throws(() => commands.wait('PC'), { status: 409 });
+  controller.abort(); assert.equal(await canceled, null);
+  const next = commands.wait('PC');
+  const result = commands.submit('PC', 'roots');
+  const job = await next; commands.finish('PC', job.id, {}); await result;
+});

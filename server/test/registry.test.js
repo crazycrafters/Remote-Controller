@@ -69,6 +69,9 @@ test('legacy IDs migrate on authenticated handshake and hostname changes retain 
   const original = await registry.enroll(undefined, info);
   const filename = path.join(directory, 'devices.json');
   const records = JSON.parse(await readFile(filename, 'utf8'));
+  const { scryptSync } = await import('node:crypto');
+  records[0].credentialHash = scryptSync(original.credential, 'remote-controller-device-credential-v1', 32).toString('hex');
+  delete records[0].credentialAlgorithm;
   records[0].id = 'PC-OLD-RANDOM-ID'; records[0].approved = false;
   await writeFile(filename, JSON.stringify(records));
   const restored = await createRegistry(directory);

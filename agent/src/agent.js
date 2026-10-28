@@ -21,6 +21,7 @@ export async function createAgent({ root, fileMode, allowedApps = [], processes 
     download: filesystem.download,
     async applications() {
       tickets.clear();
+      if (!permits.size) return [];
       return (await processes()).filter(p => p.pid > 1 && p.pid !== process.pid && permits.has(p.name)).map(p => {
         const ticket = randomBytes(24).toString('hex');
         tickets.set(ticket, { ...p, expires: Date.now() + 60_000 });

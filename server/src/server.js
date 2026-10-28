@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes, scryptSync, timingSafeEqual, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRegistry } from './registry.js';
 import { createCommands } from './commands.js';
@@ -14,6 +14,7 @@ export async function createManagementServer({ directory, password, hosts, origi
   const passwordHash = testNoAuth ? null : scryptSync(password, salt, 32);
   const sessions = new Map();
   const failures = new Map();
+  const enrollments = new Map();
   const assets = new Map(await Promise.all(['index.html', 'app.js', 'controls.js'].map(async name => [name, await readFile(new URL(`../public/${name}`, import.meta.url))])));
   assets.set('style.css', await readFile(new URL('../public/style.css', import.meta.url)));
   const server = http.createServer(async (req, res) => {
@@ -21,7 +22,9 @@ export async function createManagementServer({ directory, password, hosts, origi
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     res.setHeader('Referrer-Policy', 'no-referrer');
-    const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
+    const requestId = randomUUID();
+    res.setHeader('X-Request-Id', requestId);
+    const json = (status, data) => { if (res.destroyed || res.writableEnded) return; res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     try {
       if (!hosts.includes(req.headers.host) || (req.headers.origin && !origins.includes(req.headers.origin))) return json(403, { error: 'Unrecognized host or origin' });
       if (testNoAuth && (
@@ -30,6 +33,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       )) return json(403, { error: 'Password-free testing is limited to direct localhost connections' });
       const url = new URL(req.url, 'http://management');
       for (const [key, expires] of sessions) if (expires < Date.now()) sessions.delete(key);
+      for (const [key, value] of enrollments) if (value.until < Date.now()) enrollments.delete(key);
       for (const [key, value] of failures) if (value.until < Date.now()) failures.delete(key);
       if (req.method === 'GET' && url.pathname === '/api/config') return json(200, { testNoAuth: Boolean(testNoAuth) });
       if (req.method === 'GET' && ['/', '/app.js', '/controls.js', '/style.css'].includes(url.pathname)) {
@@ -38,10 +42,9 @@ export async function createManagementServer({ directory, password, hosts, origi
         return res.end(assets.get(name));
       }
       const ip = req.socket.remoteAddress;
-      if ((failures.get(ip)?.count || 0) >= 10) return json(429, { error: 'Too many attempts; wait one minute' });
-      const recordFailure = () => {
-        const entry = failures.get(ip) || { count: 0, until: Date.now() + 60_000 };
-        entry.count++; failures.set(ip, entry);
+      const recordFailure = (key = `login:${ip}`) => {
+        const entry = failures.get(key) || { count: 0, until: Date.now() + 60_000 };
+        entry.count++; failures.set(key, entry);
       };
       async function body(maxBytes = 4096) {
         if (req.headers['content-type'] !== 'application/json') throw Object.assign(new Error('JSON required'), { status: 415 });
@@ -57,6 +60,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       }
       if (req.method === 'POST' && url.pathname === '/api/login') {
         if (testNoAuth) return json(200, { status: 'local-test' });
+        if ((failures.get(`login:${ip}`)?.count || 0) >= 10) return json(429, { error: 'Too many sign-in attempts; wait one minute' });
         const data = await body();
         if (typeof data.password !== 'string' || !timingSafeEqual(scryptSync(data.password, salt, 32), passwordHash)) {
           recordFailure(); return json(401, { error: 'Invalid administrator password' });
@@ -68,7 +72,11 @@ export async function createManagementServer({ directory, password, hosts, origi
       }
       if (req.method === 'POST' && url.pathname === '/api/enroll') {
         const data = await body();
-        recordFailure(); // Bound registration attempts as well as failed authentication.
+        if (!data.previous) {
+          const bucket = enrollments.get(ip) || { count: 0, until: Date.now() + 60_000 };
+          if (bucket.count >= 60) return json(429, { error: 'Too many enrollment attempts; wait one minute' });
+          bucket.count++; enrollments.set(ip, bucket);
+        }
         const assigned = await registry.enroll(data.code, data.device, data.previous);
         commands.disconnect(assigned.id); connections.delete(assigned.id);
         if (data.previous?.id && data.previous.id !== assigned.id) { commands.disconnect(data.previous.id); connections.delete(data.previous.id); }
@@ -78,19 +86,26 @@ export async function createManagementServer({ directory, password, hosts, origi
         const data = await body();
         const credential = req.headers.authorization?.replace(/^Bearer /, '');
         try { return json(200, await registry.heartbeat(data.id, credential)); }
-        catch (error) { recordFailure(); throw error; }
+        catch (error) { recordFailure(`device:${ip}`); throw error; }
       }
       if (req.method === 'POST' && ['/api/device/poll', '/api/device/result'].includes(url.pathname)) {
         const credential = req.headers.authorization?.replace(/^Bearer /, '');
         let device;
         try { device = registry.authenticate(req.headers['x-device-id'], credential); }
-        catch (error) { recordFailure(); throw error; }
+        catch (error) { recordFailure(`device:${ip}`); throw error; }
         if (device.approved === false) return json(403, { error: 'Device not approved' });
         const data = await body(url.pathname.endsWith('/result') ? 12 * 1024 * 1024 : 4096);
         if (data.id !== device.id) return json(403, { error: 'Device identity mismatch' });
         if (url.pathname.endsWith('/poll')) {
           connections.set(device.id, Date.now());
-          return json(200, { command: commands.next(device.id) });
+          const controller = new AbortController();
+          const cancel = () => controller.abort();
+          res.once('close', cancel);
+          try {
+            const command = await commands.wait(device.id, controller.signal);
+            connections.set(device.id, Date.now());
+            return json(200, { command });
+          } finally { res.off('close', cancel); }
         }
         commands.finish(device.id, data.commandId, data.result, data.error);
         return json(200, { status: 'received' });
@@ -102,11 +117,11 @@ export async function createManagementServer({ directory, password, hosts, origi
         res.setHeader('Set-Cookie', 'rc_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
         return json(200, { status: 'signed-out' });
       }
-      if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: registry.list().map(device => ({ ...device, connected: !device.revoked && Date.now() - (connections.get(device.id) || 0) < 10_000 })) });
+      if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: registry.list().map(device => ({ ...device, connected: !device.revoked && Date.now() - (connections.get(device.id) || 0) < 45_000 })) });
       if (req.method === 'POST' && url.pathname === '/api/control') {
         const data = await body();
         const device = registry.list().find(device => device.id === data.id && !device.revoked && device.approved);
-        if (!device || Date.now() - (connections.get(device.id) || 0) >= 10_000) return json(409, { error: 'Agent is not connected; start it and refresh devices' });
+        if (!device || Date.now() - (connections.get(device.id) || 0) >= 45_000) return json(409, { error: 'Agent is not connected; start it and refresh devices' });
         return json(200, await commands.submit(device.id, data.operation, data.args));
       }
       if (req.method === 'POST' && url.pathname === '/api/invites') return json(201, registry.invite());
@@ -120,7 +135,19 @@ export async function createManagementServer({ directory, password, hosts, origi
         return json(200, result);
       }
       json(404, { error: 'Not found' });
-    } catch (error) { json(error.status || 500, { error: error.status ? error.message : 'Management operation failed' }); }
+    } catch (error) {
+      const storageErrors = {
+        EEXIST: 'Server storage path is not a directory. Check RC_MANAGEMENT_DATA.',
+        ENOTDIR: 'Server storage path is not a directory. Check RC_MANAGEMENT_DATA.',
+        EACCES: 'Server storage access denied. Check permissions for RC_MANAGEMENT_DATA.',
+        EPERM: 'Server storage is locked or access is denied. Check RC_MANAGEMENT_DATA and other running server instances.',
+        EBUSY: 'Server storage is busy. Retry shortly and check for another server instance.',
+        ENOSPC: 'Server storage is full. Free disk space before retrying.',
+        ENOENT: 'Server storage is unavailable. Check RC_MANAGEMENT_DATA.'
+      };
+      if (!error.status) console.error(JSON.stringify({ event: 'management-error', requestId, route: req.url?.split('?')[0], code: error.code || error.name }));
+      json(error.status || 500, { error: error.status ? error.message : storageErrors[error.code] || `Server could not complete this request. Reference: ${requestId}`, requestId });
+    }
   });
   server.on('close', () => commands.close());
   return server;

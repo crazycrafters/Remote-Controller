@@ -83,3 +83,8 @@ test('native process adapter finds and terminates a real disposable process', { 
   const [, signal] = await exited;
   assert.equal(signal, 'SIGTERM');
 });
+
+test('disabled application controls do not invoke an unavailable OS process utility', async () => {
+  const agent = await createAgent({ root: tmpdir(), processes: async () => { throw new Error('Unavailable process utility'); } });
+  assert.deepEqual(await agent.applications(), []);
+});

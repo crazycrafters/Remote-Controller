@@ -6,9 +6,9 @@ let signedIn = false;
 function message(value = '') { $('message').textContent = value; }
 function show(value) { signedIn = value; $('login').hidden = signedIn; $('workspace').hidden = !signedIn; $('logout').hidden = testNoAuth || !signedIn; if (!signedIn) { devices = []; $('devices').replaceChildren(); $('remote').hidden = true; $('remote-files').replaceChildren(); $('remote-apps').replaceChildren(); } }
 async function api(route, data) {
-  const response = await fetch(route, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  const response = await fetch(route, data === undefined ? { signal: AbortSignal.timeout(65_000) } : { signal: AbortSignal.timeout(65_000), method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json();
-  if (!response.ok) { if (response.status === 401) show(false); throw new Error(result.error); }
+  if (!response.ok) { if (response.status === 401) show(false); throw new Error(`${result.error}${response.status >= 500 && result.requestId && !result.error.includes(result.requestId) ? ` (reference ${result.requestId})` : ''}`); }
   return result;
 }
 const manage = createControls({ api, message });

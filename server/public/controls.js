@@ -4,9 +4,9 @@ export function createControls({ api, message }) {
   const command = (operation, args = {}) => api('/api/control', { id: selected, operation, args });
   async function work(fn) {
     if (busy) return message('Wait for the current device request to finish.');
-    busy = true; $('remote').setAttribute('aria-busy', 'true'); message();
+    busy = true; $('remote').setAttribute('aria-busy', 'true'); $('remote-progress').textContent = 'Working on the managed PC…'; message();
     try { await fn(); } catch (error) { message(error.message); }
-    finally { busy = false; $('remote').setAttribute('aria-busy', 'false'); }
+    finally { busy = false; $('remote').setAttribute('aria-busy', 'false'); $('remote-progress').textContent = ''; }
   }
   function button(label, fn, className = 'secondary') {
     const element = document.createElement('button'); element.textContent = label; element.className = className;
@@ -16,6 +16,7 @@ export function createControls({ api, message }) {
   async function files(folder) {
     const result = await command('files', { path: folder });
     current = result.path; parent = result.parent;
+    $('remote-mode').textContent = result.mode === 'system' ? 'All drives and folders accessible to this agent. Downloads up to 8 MiB.' : 'Configured shared folder. Downloads up to 8 MiB.';
     $('remote-path').textContent = current || 'Computer'; $('remote-up').disabled = parent === null;
     $('remote-files').replaceChildren();
     for (const entry of result.entries) {
@@ -56,8 +57,8 @@ export function createControls({ api, message }) {
     selected = id; current = ''; parent = null;
     $('remote').hidden = false; $('remote-title').textContent = `Manage ${id}`;
     $('remote-files').replaceChildren(); $('remote-apps').replaceChildren();
-    const roots = await command('roots');
-    $('remote-mode').textContent = roots.mode === 'system' ? 'All drives and folders accessible to this agent. Downloads up to 8 MiB.' : 'Configured shared folder. Downloads up to 8 MiB.';
-    await files(''); await applications();
+    const results = await Promise.allSettled([files(''), applications()]);
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
   });
 }

@@ -105,21 +105,25 @@ and complete only its own requests.
 
 ## What the connection supports
 
-The agent polls the server once per second for typed commands. The server uses
+The agent holds a long-poll request open for up to 10 seconds; the server wakes it
+immediately when a typed command is available. The server uses
 that outbound channel for file browsing, downloads, listing allowed applications,
 and closing applications. It works behind typical NAT/firewalls without port
 forwarding on employee PCs. It is polling, not a WebSocket or direct server-to-PC
 network connection.
 
 The dashboard shows **Connected** after a recent poll; stale connections become
-unavailable after 10 seconds. Heartbeats run every 30 seconds, with inventory
-presence expiring after 90 seconds. Reconnection retries occur every 5 seconds.
+unavailable after 45 seconds. Heartbeats run every 30 seconds, with inventory
+presence expiring after 90 seconds. Initial registration retries occur every 5 seconds. Established connections retry
+with bounded backoff without registering again or replaying actions.
 The server can manage a PC while its agent is running and reachable; a powered-off
 or sleeping PC cannot be controlled. Automatic OS startup/service installation is
 not implemented.
 
-Commands time out after 20 seconds, are not replayed automatically, and do not
-survive a server restart. A timed-out action may already have started on the PC;
+Commands time out after 60 seconds, are not replayed automatically, and do not
+survive a server restart. File/process operations run with two workers, while
+heartbeats and connection handling continue independently. Result delivery can
+retry the same response, but never re-executes an action. A timed-out action may already have started on the PC;
 refresh state before retrying. Revocation rejects future device requests and
 cancels queued commands; it cannot undo an action already executed.
 
@@ -199,3 +203,17 @@ This prototype uses one administrator password, a single-process JSON registry,
 and in-memory command queues. A commercial deployment needs database-backed
 organization isolation, administrator roles/SSO/MFA, audit records, signed
 installers/updates, service startup, transport streaming, and load testing.
+
+## Troubleshooting operation errors
+
+The dashboard reports permission, missing-file, and server-storage errors with
+a request reference. Unexpected server errors emit a `management-error` record
+with that reference, route, and error code in the management terminal, without
+logging credentials or request bodies. Check RC_MANAGEMENT_DATA permissions,
+disk space, and that only one server process owns the registry. Temporary
+Windows file-replacement contention is retried with bounded delays.
+
+Long polling requires your reverse proxy to allow at least 20 seconds for agent
+requests and at least 65 seconds for administrator control requests. A socket
+transport is not needed for these file/process commands; screen streaming would
+need a separate design.

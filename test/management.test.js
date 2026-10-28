@@ -35,6 +35,9 @@ test('management API login, enrollment client restart, dashboard inventory, and 
   const restarted = await connectDevice({ ...options, code: undefined });
   assert.equal(restarted.id, device.id);
   await restarted.heartbeat();
+  // Successful reconnects used to exhaust a shared login limiter and break all requests.
+  for (let i = 0; i < 12; i++) await connectDevice(options);
+  assert.equal((await restarted.heartbeat()).status, 'registered');
   const devices = await (await fetch(base + '/api/devices', { headers: { Cookie: cookie } })).json();
   assert.equal(devices.devices.length, 1);
   assert.equal(devices.devices[0].id, device.id);
@@ -161,4 +164,23 @@ test('one agent loads .env, auto-connects, serves central file controls, reconne
   assert.equal((await control('files')).status, 200);
   await fetch(base + '/api/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id }) });
   assert.equal((await control('files')).status, 409);
+});
+
+test('storage failures return a specific error and request reference without credential values', async t => {
+  const { writeFile } = await import('node:fs/promises');
+  const directory = await temporary(t); const storage = path.join(directory, 'server');
+  const hosts = [];
+  const server = await createManagementServer({ directory: storage, hosts, origins: [], testNoAuth: true });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const host = `127.0.0.1:${server.address().port}`; hosts.push(host);
+  const device = await connectDevice({ server: `http://${host}`, directory: path.join(directory, 'identity') });
+  await rm(storage, { recursive: true }); await writeFile(storage, 'blocked by a file');
+  const logs = []; t.mock.method(console, 'error', value => logs.push(value));
+  await assert.rejects(device.heartbeat(), error => {
+    assert.match(error.message, /storage path is not a directory/);
+    assert.equal(error.status, 500); assert.ok(error.requestId); return true;
+  });
+  assert.equal(JSON.parse(logs[0]).code, 'EEXIST');
+  assert.ok(!logs[0].includes('Bearer'));
 });
