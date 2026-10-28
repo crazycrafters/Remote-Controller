@@ -5,6 +5,8 @@ let devices = [];
 let testNoAuth = false;
 let signedIn = false;
 let events = null;
+const pageId = location.pathname.startsWith('/pcs/') ? decodeURIComponent(location.pathname.slice(5)) : null;
+let loadedPC = null;
 function message(value = '') { $('message').textContent = value; }
 function show(value) { signedIn = value; $('login').hidden = signedIn; $('workspace').hidden = !signedIn; $('logout').hidden = testNoAuth || !signedIn; if (!signedIn) { events?.close(); events = null; deviceRefresh.invalidate(); devices = []; $('devices').replaceChildren(); $('remote').hidden = true; $('remote-files').replaceChildren(); $('remote-apps').replaceChildren(); } }
 async function api(route, data) {
@@ -20,18 +22,37 @@ function render() {
   for (const device of devices.filter(d => `${d.id} ${d.hostname}`.toLowerCase().includes(search))) {
     const row = document.createElement('li');
     const label = document.createElement('span');
-    label.textContent = `${device.id} · ${device.platform} · ${device.revoked ? 'Revoked' : !device.approved ? 'Pending approval' : device.connected ? 'Connected' : device.online ? 'Reconnecting' : 'Offline'} · Last seen ${new Date(device.lastSeen).toLocaleString()}`;
+    label.className = 'device-label';
+    label.textContent = device.hostname;
+    const details = document.createElement('p'); details.className = 'process-meta'; details.textContent = `${device.id} · ${device.platform} · ${device.connected ? 'Connected' : 'Disconnected'} · Last seen ${new Date(device.lastSeen).toLocaleString()}`;
     const dot = document.createElement('span'); dot.className = `presence-dot ${device.connected ? 'connected' : 'disconnected'}`; dot.setAttribute('aria-label', device.connected ? 'Connected' : 'Disconnected'); dot.title = device.connected ? 'Connected' : 'Disconnected'; label.prepend(dot);
     const disconnect = document.createElement('button'); disconnect.className = 'danger'; disconnect.textContent = 'Disconnect'; disconnect.disabled = !device.connected;
     disconnect.onclick = () => execute(async () => { if (confirm(`Disconnect ${device.id}? Restart its agent to reconnect.`)) { await api('/api/disconnect', { id: device.id }); await refresh(); } });
     const approve = document.createElement('button'); approve.textContent = 'Approve';
     approve.hidden = device.approved || device.revoked;
     approve.onclick = () => execute(async () => { await api('/api/approve', { id: device.id }); await refresh(); });
-    const open = document.createElement('button'); open.textContent = 'Manage'; open.disabled = !device.connected || device.revoked; open.onclick = () => manage(device.id);
+    const open = document.createElement('a'); open.textContent = 'Open workspace →'; open.href = `/pcs/${encodeURIComponent(device.id)}`;
+    if (!device.connected) { open.removeAttribute('href'); open.setAttribute('aria-disabled', 'true'); }
+    if (device.connected) { const link = document.createElement('a'); link.href = open.href; link.append(...label.childNodes); label.append(link); }
     const actions = document.createElement('div'); actions.className = 'row'; actions.append(open, approve, disconnect);
-    row.append(label, actions); $('devices').append(row);
+    row.append(label, details, actions); $('devices').append(row);
   }
   if (!$('devices').children.length) $('devices').textContent = 'No matching computers.';
+  route();
+}
+function route() {
+  $('pc-overview').hidden = Boolean(pageId); $('remote').hidden = !pageId;
+  if (!pageId) return;
+  const device = devices.find(device => device.id === pageId);
+  $('remote-title').textContent = pageId;
+  $('pc-details').textContent = device ? `${device.hostname} · ${device.platform} · Last seen ${new Date(device.lastSeen).toLocaleString()}` : 'Device not found on this server';
+  const connected = Boolean(device?.connected);
+  $('pc-live-status').replaceChildren();
+  const dot = document.createElement('span'); dot.className = `presence-dot ${connected ? 'connected' : 'disconnected'}`;
+  $('pc-live-status').append(dot, connected ? 'Connected' : 'Disconnected');
+  $('remote-controls').disabled = !connected;
+  if (connected && loadedPC !== pageId) { loadedPC = pageId; void manage(pageId); }
+  if (!connected) loadedPC = null;
 }
 let apiVersion = '?';
 const deviceRefresh = createDeviceRefresh({

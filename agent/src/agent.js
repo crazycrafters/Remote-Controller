@@ -1,3 +1,4 @@
+import { runShell } from './terminal.js';
 import { createFilesystem } from './filesystem.js';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { listProcesses, closeProcess } from './processes.js';
@@ -14,6 +15,7 @@ export async function createAgent({ root, fileMode, allowedApps, processes = lis
   const tickets = new Map();
   return {
     roots: filesystem.roots,
+    async terminal(command, folder) { return runShell(command, await filesystem.directory(folder)); },
     browse: filesystem.browse,
     async files(value = '') {
       return (await filesystem.browse(value)).entries.map(({ name, directory }) => ({ name, directory }));

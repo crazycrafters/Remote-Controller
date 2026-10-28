@@ -42,8 +42,8 @@ export async function createManagementServer({ directory, password, hosts, origi
       for (const [key, value] of enrollments) if (value.until < Date.now()) enrollments.delete(key);
       for (const [key, value] of failures) if (value.until < Date.now()) failures.delete(key);
       if (req.method === 'GET' && url.pathname === '/api/config') return json(200, { testNoAuth: Boolean(testNoAuth), apiVersion: 2, transport: 'long-poll' });
-      if (req.method === 'GET' && ['/', '/app.js', '/controls.js', '/device-refresh.js', '/style.css'].includes(url.pathname)) {
-        const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+      if (req.method === 'GET' && (['/', '/app.js', '/controls.js', '/device-refresh.js', '/style.css'].includes(url.pathname) || /^\/pcs\/[^/]+$/.test(url.pathname))) {
+        const name = url.pathname === '/' || url.pathname.startsWith('/pcs/') ? 'index.html' : url.pathname.slice(1);
         res.writeHead(200, { 'Content-Type': name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.css') ? 'text/css' : 'text/javascript' });
         return res.end(assets.get(name));
       }
@@ -143,7 +143,7 @@ export async function createManagementServer({ directory, password, hosts, origi
       }
       if (req.method === 'GET' && url.pathname === '/api/devices') return json(200, { devices: snapshot() });
       if (req.method === 'POST' && url.pathname === '/api/control') {
-        const data = await body();
+        const data = await body(16 * 1024);
         const device = registry.list().find(device => device.id === data.id && !device.revoked && device.approved);
         if (!device || !presence.connected(device.id)) return json(409, { error: 'Agent is not connected; start it and refresh devices' });
         return json(200, await commands.submit(device.id, data.operation, data.args));

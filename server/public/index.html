@@ -1,12 +1,17 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Device Management</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head><body><main>
-<header><div><span class="eyebrow">COMPANY DEVICE MANAGEMENT</span><h1>Device Management</h1></div><button id="logout" hidden>Sign out</button></header>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Remote Controller</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head><body><main>
+<header><div><a href="/" class="brand">REMOTE CONTROLLER</a><h1>Device workspace</h1></div><button id="logout" class="secondary" hidden>Sign out</button></header>
 <section id="login"><form id="signin"><h2>Administrator sign-in</h2><label for="password">Administrator password</label><div class="row"><input id="password" type="password" autocomplete="current-password" required><button>Sign in</button></div></form></section>
 <p id="connection-status" role="status">Connecting to management server…</p><p id="message" role="alert"></p>
-<div id="workspace" hidden><section><h2>Automatic connection</h2><p>Configure RC_SERVER_URL on each PC and start the agent. New PCs register automatically as PCname-OS. Returning PCs reconnect with their saved identity. Select Manage when the device is connected.</p></section>
-<section><div class="section-title"><h2>Company computers</h2><button id="refresh" class="secondary">Refresh</button></div><label for="search">Search by device ID or PC name</label><input id="search" placeholder="Search devices"><ul id="devices"></ul></section>
-<div id="remote" hidden><h2 id="remote-title"></h2><p id="remote-progress" role="status"></p>
-<section><div class="section-title"><h2>Files &amp; drives</h2><button id="remote-refresh-files" class="secondary">Refresh files</button></div><p id="remote-mode"></p><div class="row"><button id="remote-computer" class="secondary">Computer</button><button id="remote-up" class="secondary">↑ Parent</button><code id="remote-path"></code></div><ul id="remote-files"></ul></section>
-<section><div class="section-title"><h2>Running applications</h2><button id="remote-refresh-apps" class="secondary">Refresh applications</button></div><ul id="remote-apps"></ul></section>
+<div id="workspace" hidden>
+<div id="pc-overview"><section><div class="section-title"><div><h2>Your computers</h2><p>Select a connected computer to open its workspace.</p></div><button id="refresh" class="secondary">Refresh</button></div><label for="search">Find a computer</label><input id="search" placeholder="Search device name or ID"><ul id="devices" class="device-grid"></ul></section></div>
+<div id="remote" hidden>
+<section class="pc-header"><div><a href="/" class="back-link">← All computers</a><h2 id="remote-title"></h2><p id="pc-details"></p></div><span id="pc-live-status" role="status"></span></section>
+<p id="remote-progress" role="status"></p>
+<fieldset id="remote-controls"><div class="workspace-grid"><div class="workspace-left">
+<section class="files-panel"><div class="section-title"><h2>Filesystem</h2><button id="remote-refresh-files" class="secondary">Refresh</button></div><p id="remote-mode"></p><div class="row path-bar"><button id="remote-computer" class="secondary">Computer</button><button id="remote-up" class="secondary">↑ Parent</button><code id="remote-path">Computer</code></div><ul id="remote-files"></ul></section>
+<section class="terminal-panel"><div class="section-title"><h2>Terminal</h2><span class="muted">15s / command</span></div><p>Working directory: <code id="terminal-cwd">Choose a filesystem folder</code></p><pre id="terminal-output" tabindex="0" aria-live="polite">Select a folder above to run commands there.</pre><form id="terminal-form"><label for="terminal-command">Shell command</label><div class="row"><input id="terminal-command" autocomplete="off" spellcheck="false" placeholder="Enter a command" maxlength="3000" required disabled><button id="terminal-run" disabled>Run</button></div></form><p class="muted">Commands run as the agent's OS account in the selected folder. Each command starts a new shell.</p></section>
+</div><section class="apps-panel"><div class="section-title"><h2>Running applications</h2><button id="remote-refresh-apps" class="secondary">Refresh</button></div><p class="muted">Process ID and browser profile, when available.</p><ul id="remote-apps"></ul></section></div></fieldset>
 </div></div>
-<footer>Authorized device management · Files and permitted applications · No screen capture or employee activity recording.</footer>
+<footer>Authorized device management · OS permissions apply · Commands execute on the selected PC</footer>
 </main></body></html>

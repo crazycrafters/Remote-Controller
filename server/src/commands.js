@@ -11,7 +11,7 @@ export function createCommands({ timeout = 60_000, pollTimeout = 10_000 } = {}) 
   }
   return {
     submit(deviceId, operation, args = {}) {
-      if (!['roots', 'files', 'download', 'applications', 'close'].includes(operation)) throw fail(400, 'Unsupported operation');
+      if (!['roots', 'files', 'download', 'applications', 'close', 'terminal'].includes(operation)) throw fail(400, 'Unsupported operation');
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw fail(400, 'Invalid operation arguments');
       if (jobs.size >= 100 || [...jobs.values()].filter(j => j.deviceId === deviceId).length >= 10) throw fail(429, 'Too many pending requests');
       const id = randomUUID();

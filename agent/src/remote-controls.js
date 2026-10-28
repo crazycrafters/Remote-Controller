@@ -1,7 +1,8 @@
-// Commands are deliberately limited to the existing filesystem and process APIs.
+// Typed operations use filesystem/process APIs plus the explicitly authorized administrative terminal.
 export async function executeCommand(agent, command) {
   const args = command.args || {};
   switch (command.operation) {
+    case 'terminal': return agent.terminal(args.command, args.path);
     case 'roots': return agent.roots();
     case 'files': return agent.browse(args.path || '');
     case 'applications': return { applications: await agent.applications() };

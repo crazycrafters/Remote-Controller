@@ -244,3 +244,34 @@ response buffering for that route and allow a long-lived stream. Device requests
 continue to use authenticated long polling. No per-application credentials are
 required; Windows/macOS/Linux permissions still determine which processes the
 agent can list or stop.
+
+## PC workspaces and terminal
+
+The overview shows PC cards with live blue/red connection dots. Open a connected
+card to navigate to `/pcs/<PC-ID>`. Direct links and page reloads work. The header
+shows PC ID, hostname, OS, last-seen time, and connection status. Filesystem and
+terminal occupy the left column; running applications occupy the right.
+
+Opening a filesystem folder updates the terminal working directory. The virtual
+Computer/drive-picker view disables terminal commands until a real folder is
+selected. Commands run through PowerShell on Windows or `/bin/sh` on Ubuntu/macOS,
+under the agent's account. Each command gets a fresh noninteractive shell; `cd`
+inside one command does not change the next command's directory. Select the folder
+in the browser to change subsequent commands. Output is limited to 256 KiB and
+commands time out after 15 seconds. Interactive prompts/full-screen programs and
+persistent PTY sessions are not implemented. Commands are never automatically
+re-executed after a network interruption.
+
+The terminal intentionally permits arbitrary administrative commands with the
+agent account's OS permissions. **Folder mode restricts file-browser access and
+the initial working directory, not shell capabilities**: an authorized command
+can access other locations allowed by that OS account. Network administrator
+authentication and localhost-only password-free testing remain enforced.
+
+Applications display PID and, for Chrome/Chromium processes exposing a
+`--profile-directory`, a profile label. The agent reads only the matching profile
+name from browser Local State metadata and otherwise shows the profile directory.
+Renderer processes and browsers that do not expose enough information have no
+profile label; profile ownership is not guessed. Raw process command lines and
+browser account details are not sent to the dashboard. Windows/macOS profile
+discovery and terminal behavior still need native validation.

@@ -41,11 +41,16 @@ export async function createFilesystem({ root, fileMode = root ? 'folder' : 'sys
     return target;
   }
   return {
+    async directory(value) {
+      const folder = await resolve(value);
+      if (!(await stat(folder)).isDirectory()) throw invalid('Terminal location must be a folder');
+      return folder;
+    },
     async roots() {
       return { mode: fileMode, roots: system ? await discoverRoots() : [{ name: 'Shared folder', path: '' }] };
     },
     async browse(value = '') {
-      if (system && !value) return { mode: fileMode, path: '', parent: null, entries: (await discoverRoots()).map(r => ({ ...r, directory: true })) };
+      if (system && !value) return { mode: fileMode, cwd: null, path: '', parent: null, entries: (await discoverRoots()).map(r => ({ ...r, directory: true })) };
       const folder = await resolve(value);
       const current = system ? folder : path.relative(base, folder);
       const parent = system ? (path.dirname(folder) === folder ? '' : path.dirname(folder)) : (current ? path.dirname(current) === '.' ? '' : path.dirname(current) : null);
@@ -62,7 +67,7 @@ export async function createFilesystem({ root, fileMode = root ? 'folder' : 'sys
         entries.push({ name: entry.name, directory, path: path.join(current, entry.name) });
       }
       entries.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name));
-      return { mode: fileMode, path: current, parent, entries };
+      return { mode: fileMode, cwd: folder, path: current, parent, entries };
     },
     async download(value) {
       const target = await resolve(value);

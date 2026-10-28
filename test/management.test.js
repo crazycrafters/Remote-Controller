@@ -141,9 +141,12 @@ test('one agent loads .env, auto-connects, serves central file controls, reconne
   async function control(operation, args = {}) {
     return fetch(base + '/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id, operation, args }) });
   }
+  assert.equal((await fetch(base + '/pcs/' + encodeURIComponent(device.id))).status, 200);
   assert.equal((await (await control('roots')).json()).mode, 'folder');
   const listing = await (await control('files')).json();
   assert.equal(listing.entries[0].name, 'sample.bin');
+  const terminal = await (await control('terminal', { path: '', command: process.platform === 'win32' ? '(Get-Location).Path' : 'pwd' })).json();
+  assert.equal(terminal.stdout.trim(), root);
   const downloaded = await (await control('download', { path: 'sample.bin' })).json();
   assert.deepEqual(Buffer.from(downloaded.data, 'base64'), binary);
   assert.equal((await control('files', { path: '..' })).status, 403);
