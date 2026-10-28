@@ -4,11 +4,11 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRegistry } from './registry.js';
 
-export async function createManagementServer({ directory, password, hosts, origins, secureCookies = true }) {
-  if (typeof password !== 'string' || password.length < 12) throw new Error('Set RC_ADMIN_PASSWORD to at least 12 characters');
+export async function createManagementServer({ directory, password, hosts, origins, secureCookies = true, testNoAuth = false }) {
+  if (!testNoAuth && (typeof password !== 'string' || password.length < 12)) throw new Error('Set RC_ADMIN_PASSWORD to at least 12 characters');
   const registry = await createRegistry(directory);
   const salt = randomBytes(16);
-  const passwordHash = scryptSync(password, salt, 32);
+  const passwordHash = testNoAuth ? null : scryptSync(password, salt, 32);
   const sessions = new Map();
   const failures = new Map();
   const assets = new Map(await Promise.all(['index.html', 'app.js'].map(async name => [name, await readFile(new URL(`../public/${name}`, import.meta.url))])));
@@ -21,9 +21,14 @@ export async function createManagementServer({ directory, password, hosts, origi
     const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     try {
       if (!hosts.includes(req.headers.host) || (req.headers.origin && !origins.includes(req.headers.origin))) return json(403, { error: 'Unrecognized host or origin' });
+      if (testNoAuth && (
+        !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) ||
+        Object.keys(req.headers).some(name => name === 'forwarded' || name === 'x-real-ip' || name.startsWith('x-forwarded-'))
+      )) return json(403, { error: 'Password-free testing is limited to direct localhost connections' });
       const url = new URL(req.url, 'http://management');
       for (const [key, expires] of sessions) if (expires < Date.now()) sessions.delete(key);
       for (const [key, value] of failures) if (value.until < Date.now()) failures.delete(key);
+      if (req.method === 'GET' && url.pathname === '/api/config') return json(200, { testNoAuth: Boolean(testNoAuth) });
       if (req.method === 'GET' && ['/', '/app.js', '/style.css'].includes(url.pathname)) {
         const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
         res.writeHead(200, { 'Content-Type': name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.css') ? 'text/css' : 'text/javascript' });
@@ -46,6 +51,7 @@ export async function createManagementServer({ directory, password, hosts, origi
         catch { throw Object.assign(new Error('Invalid JSON'), { status: 400 }); }
       }
       if (req.method === 'POST' && url.pathname === '/api/login') {
+        if (testNoAuth) return json(200, { status: 'local-test' });
         const data = await body();
         if (typeof data.password !== 'string' || !timingSafeEqual(scryptSync(data.password, salt, 32), passwordHash)) {
           recordFailure(); return json(401, { error: 'Invalid administrator password' });
@@ -67,7 +73,7 @@ export async function createManagementServer({ directory, password, hosts, origi
         catch (error) { recordFailure(); throw error; }
       }
       const session = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('rc_admin='))?.slice(9);
-      if (!sessions.has(session)) return json(401, { error: 'Administrator sign-in required' });
+      if (!testNoAuth && !sessions.has(session)) return json(401, { error: 'Administrator sign-in required' });
       if (req.method === 'POST' && url.pathname === '/api/logout') {
         sessions.delete(session);
         res.setHeader('Set-Cookie', 'rc_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
@@ -87,14 +93,17 @@ export async function createManagementServer({ directory, password, hosts, origi
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const testNoAuth = process.argv.includes('--test-no-auth');
   const port = Number(process.env.RC_MANAGEMENT_PORT || 4320);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid management port');
   const server = await createManagementServer({
+    testNoAuth,
     directory: process.env.RC_MANAGEMENT_DATA || '.remote-controller-server',
     password: process.env.RC_ADMIN_PASSWORD,
-    hosts: (process.env.RC_MANAGEMENT_HOSTS || `localhost:${port},127.0.0.1:${port}`).split(','),
-    origins: (process.env.RC_MANAGEMENT_ORIGINS || `http://localhost:${port},http://127.0.0.1:${port}`).split(','),
+    hosts: ((!testNoAuth && process.env.RC_MANAGEMENT_HOSTS) || `localhost:${port},127.0.0.1:${port}`).split(','),
+    origins: ((!testNoAuth && process.env.RC_MANAGEMENT_ORIGINS) || `http://localhost:${port},http://127.0.0.1:${port}`).split(','),
     secureCookies: process.env.RC_MANAGEMENT_LOCAL_HTTP !== '1'
   });
-  server.listen(port, process.env.RC_MANAGEMENT_BIND || '127.0.0.1', () => console.log(`Device management server listening on port ${port}. HTTPS required except local development.`));
+  if (testNoAuth) console.log('LOCAL TEST MODE: no administrator password required. Direct localhost connections only.');
+  server.listen(port, testNoAuth ? '127.0.0.1' : process.env.RC_MANAGEMENT_BIND || '127.0.0.1', () => console.log(`Device management server listening on port ${port}. HTTPS required except local development.`));
 }

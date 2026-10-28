@@ -1,7 +1,8 @@
 const $ = id => document.getElementById(id);
 let devices = [];
+let testNoAuth = false;
 function message(value = '') { $('message').textContent = value; }
-function show(signedIn) { $('login').hidden = signedIn; $('workspace').hidden = !signedIn; $('logout').hidden = !signedIn; if (!signedIn) { devices = []; $('devices').replaceChildren(); $('code').textContent = ''; } }
+function show(signedIn) { $('login').hidden = signedIn; $('workspace').hidden = !signedIn; $('logout').hidden = testNoAuth || !signedIn; if (!signedIn) { devices = []; $('devices').replaceChildren(); $('code').textContent = ''; } }
 async function api(route, data) {
   const response = await fetch(route, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json();
@@ -32,4 +33,4 @@ $('invite').onclick = () => execute(async () => { const invite = await api('/api
 $('refresh').onclick = () => execute(refresh);
 $('logout').onclick = () => execute(async () => { await api('/api/logout', {}); show(false); });
 $('search').oninput = render;
-void execute(refresh);
+void execute(async () => { const config = await api('/api/config'); testNoAuth = config.testNoAuth; if (testNoAuth) document.querySelector('footer').textContent = 'Local test mode · No password · Direct localhost access only'; await refresh(); });

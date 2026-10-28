@@ -64,8 +64,8 @@ async function apps() {
   if (!data.applications.length) $('apps').textContent = 'No permitted applications are running. Configure RC_ALLOWED_APPS on the agent to enable controls.';
 }
 function disconnect() { token = ''; folder = ''; $('workspace').hidden = true; $('login').hidden = false; $('status').textContent = 'Disconnected'; $('files').replaceChildren(); $('apps').replaceChildren(); }
-$('connect').onsubmit = async event => {
-  event.preventDefault(); token = $('token').value; $('token').value = ''; message();
+async function connect() {
+  token = $('token').value; $('token').value = ''; message();
   try {
     const health = await (await api('/api/health')).json();
     $('status').textContent = `Connected · ${health.platform}`; $('workspace').hidden = false; $('login').hidden = true;
@@ -74,9 +74,18 @@ $('connect').onsubmit = async event => {
     folder = '';
     await files(); await apps();
   } catch (error) { message(error.message); }
-};
+}
+$('connect').onsubmit = event => { event.preventDefault(); void connect(); };
 function action(id, fn) { $(id).onclick = async () => { message(); try { await fn(); } catch (error) { message(error.message); } }; }
 action('computer', async () => { const previous = folder; folder = ''; try { await files(); } catch (error) { folder = previous; throw error; } });
 action('refresh-files', files); action('refresh-apps', apps);
 action('up', async () => { const previous = folder; folder = parent; try { await files(); } catch (error) { folder = previous; throw error; } });
 $('disconnect').onclick = disconnect;
+
+fetch('/api/config').then(response => response.json()).then(config => {
+  if (config.testNoAuth) {
+    $('disconnect').hidden = true;
+    document.querySelector('footer').textContent = 'Local test mode · No password · Direct localhost access only';
+    void connect();
+  }
+}).catch(error => message(error.message));

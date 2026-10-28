@@ -1,5 +1,14 @@
 # Remote Controller management server
 
+## Password-free local testing
+
+From this directory, run `npm run dev` to open the admin dashboard on localhost port 4320
+without entering a password or token. This mode is limited to direct localhost
+connections. For device registration, also run `npm start` in the agent directory
+while the management server is running. See the root README for the three-terminal
+local test walkthrough.
+
+
 Deploy this directory to the administrator's server, not to managed PCs. Requires
 Node.js 22+. No third-party runtime dependencies; the agent directory is not needed
 at runtime. This package owns the admin dashboard, registry, ID assignment,

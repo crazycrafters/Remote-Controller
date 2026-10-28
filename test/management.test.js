@@ -54,3 +54,32 @@ test('device enrollment requires HTTPS outside loopback and disallows embedded c
   assert.equal(managementUrl('http://127.0.0.1:4320'), 'http://127.0.0.1:4320');
   for (const url of ['http://company.example', 'https://user:password@company.example', 'https://company.example/path', 'https://company.example?secret=x']) assert.throws(() => managementUrl(url));
 });
+
+test('local test mode opens both dashboards without passwords while preserving origin and proxy checks', async t => {
+  const directory = await temporary(t);
+  const { createServer } = await import('../agent/src/control-server.js');
+  const hosts = [];
+  const management = await createManagementServer({ directory, hosts, origins: [], testNoAuth: true });
+  const agent = await createServer({ root: directory, hosts, origins: [], testNoAuth: true });
+  for (const server of [management, agent]) {
+    server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+    hosts.push(`127.0.0.1:${server.address().port}`);
+  }
+  const managementBase = `http://127.0.0.1:${management.address().port}`;
+  const agentBase = `http://127.0.0.1:${agent.address().port}`;
+  assert.equal((await fetch(managementBase + '/api/devices')).status, 200);
+  assert.equal((await fetch(agentBase + '/api/files')).status, 200);
+  for (const base of [managementBase, agentBase]) {
+    const config = await (await fetch(base + '/api/config')).json();
+    assert.equal(config.testNoAuth, true);
+    assert.equal((await fetch(base + '/', { headers: { Origin: 'https://untrusted.example' } })).status, 403);
+    assert.equal((await fetch(base + '/api/config', { headers: { 'X-Forwarded-For': '203.0.113.1' } })).status, 403);
+    assert.equal((await fetch(base + '/api/config', { headers: { Forwarded: 'for=203.0.113.1' } })).status, 403);
+  }
+  const device = await connectDevice({ server: managementBase, directory: path.join(directory, 'device') });
+  assert.equal((await device.heartbeat()).status, 'pending');
+  const approve = await fetch(managementBase + '/api/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: device.id }) });
+  assert.equal(approve.status, 200);
+  assert.equal((await device.heartbeat()).status, 'registered');
+});

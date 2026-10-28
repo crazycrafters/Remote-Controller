@@ -19,7 +19,12 @@ export async function createServer(config) {
       // Reject cross-origin browser requests, including DNS rebinding via an unexpected Host.
       if (!config.hosts.includes(req.headers.host)) return json(403, { error: 'Unrecognized host' });
       if (req.headers.origin && !config.origins.includes(req.headers.origin)) return json(403, { error: 'Unrecognized origin' });
+      if (config.testNoAuth && (
+        !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) ||
+        Object.keys(req.headers).some(name => name === 'forwarded' || name === 'x-real-ip' || name.startsWith('x-forwarded-'))
+      )) return json(403, { error: 'Password-free testing is limited to direct localhost connections' });
       const url = new URL(req.url, 'http://agent');
+      if (req.method === 'GET' && url.pathname === '/api/config') return json(200, { testNoAuth: Boolean(config.testNoAuth) });
       if (req.method === 'GET' && ['/', '/app.js', '/style.css'].includes(url.pathname)) {
         const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
         res.writeHead(200, { 'Content-Type': { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'style.css': 'text/css; charset=utf-8' }[name] });
@@ -29,7 +34,7 @@ export async function createServer(config) {
       const now = Date.now();
       for (const [key, value] of attempts) if (value.until <= now) attempts.delete(key);
       if ((attempts.get(ip)?.count || 0) >= 20) return json(429, { error: 'Too many failed attempts; wait one minute' });
-      if (!authorized(req.headers.authorization, config.token)) {
+      if (!config.testNoAuth && !authorized(req.headers.authorization, config.token)) {
         const entry = attempts.get(ip) || { count: 0, until: now + 60_000 };
         entry.count++; attempts.set(ip, entry);
         return json(401, { error: 'Authentication required' });
@@ -67,13 +72,15 @@ export async function createServer(config) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const testNoAuth = process.argv.includes('--test-no-auth');
   const token = process.env.RC_TOKEN;
-  if (!token || Buffer.byteLength(token) < 32) throw new Error('Set RC_TOKEN to a random secret of at least 32 bytes');
-  const host = process.env.RC_BIND || '127.0.0.1';
+  if (!testNoAuth && (!token || Buffer.byteLength(token) < 32)) throw new Error('Set RC_TOKEN to a random secret of at least 32 bytes');
+  const host = testNoAuth ? '127.0.0.1' : process.env.RC_BIND || '127.0.0.1';
   const port = Number(process.env.RC_PORT || 4310);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid RC_PORT');
-  const hosts = (process.env.RC_HOSTS || `localhost:${port},127.0.0.1:${port}`).split(',');
-  const origins = (process.env.RC_ORIGINS || `http://localhost:${port},http://127.0.0.1:${port}`).split(',');
-  const server = await createServer({ token, root: process.env.RC_ROOT, fileMode: process.env.RC_FILE_MODE, hosts, origins, allowedApps: (process.env.RC_ALLOWED_APPS || '').split(',').filter(Boolean) });
+  const hosts = ((!testNoAuth && process.env.RC_HOSTS) || `localhost:${port},127.0.0.1:${port}`).split(',');
+  const origins = ((!testNoAuth && process.env.RC_ORIGINS) || `http://localhost:${port},http://127.0.0.1:${port}`).split(',');
+  const server = await createServer({ testNoAuth, token, root: process.env.RC_ROOT, fileMode: process.env.RC_FILE_MODE, hosts, origins, allowedApps: (process.env.RC_ALLOWED_APPS || '').split(',').filter(Boolean) });
+  if (testNoAuth) console.log('LOCAL TEST MODE: no password required. Direct localhost connections only.');
   server.listen(port, host, () => console.log(`Remote Controller listening on ${host}:${port}; use only localhost or a private encrypted VPN connection.`));
 }

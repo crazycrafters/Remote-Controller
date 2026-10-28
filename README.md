@@ -4,6 +4,43 @@ A Node.js home-computer agent with a browser dashboard. Browse all available dri
 download files, and close explicitly permitted applications without taking over
 someone else's desktop. Requires Node.js 22 or newer. No third-party dependencies.
 
+## Quick local test — no passwords
+
+Run these commands in **three terminals**, all from the repository root, on the
+same computer (Node.js 22+):
+
+```sh
+# Terminal 1: central admin dashboard, port 4320
+npm run dev:server
+```
+
+```sh
+# Terminal 2: register this PC and send online status
+npm run device
+```
+
+```sh
+# Terminal 3: direct file browser, port 4310
+npm run dev:agent
+```
+
+Open the local dashboard on port 4320: no sign-in is needed. The PC appears with
+its assigned ID; select **Approve**. Open the local agent dashboard on port 4310:
+it connects automatically, without an access token. Device credentials remain
+automatically managed; you do not need to enter or copy them.
+
+These remain separate dashboards: central inventory does not yet provide remote
+file controls. The third terminal is only needed to test direct file access.
+
+The `dev` commands enable password-free **local testing only**. They force a
+loopback listener, use local hosts/origins, and reject forwarded/proxied requests.
+No router, VPN, or reverse-proxy access is supported in this mode. Normal `start`
+and `control` commands retain authentication for non-test use.
+
+If testing an existing device identity, use its original RC_DEVICE_DATA as noted
+below. The management server and device must be pointed at the same registry as
+before, or use separate fresh data directories together for a new test.
+
 ## Repository layout
 
 ```text
