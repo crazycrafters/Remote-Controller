@@ -217,3 +217,11 @@ Long polling requires your reverse proxy to allow at least 20 seconds for agent
 requests and at least 65 seconds for administrator control requests. A socket
 transport is not needed for these file/process commands; screen streaming would
 need a separate design.
+
+The dashboard connection banner shows **API 2 · Long polling** for this server
+build. Device refreshes are coalesced, retain the last successful list during
+outages, and retry with a 5–30 second backoff. A brief network outage updates
+that banner instead of repeatedly overwriting operation errors. If the exact
+old message “Management operation failed” still appears, check that the intended
+server process was restarted from the updated MVP checkout and reload the browser.
+The current server returns specific errors or a request reference instead.

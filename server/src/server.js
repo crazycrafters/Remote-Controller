@@ -15,7 +15,7 @@ export async function createManagementServer({ directory, password, hosts, origi
   const sessions = new Map();
   const failures = new Map();
   const enrollments = new Map();
-  const assets = new Map(await Promise.all(['index.html', 'app.js', 'controls.js'].map(async name => [name, await readFile(new URL(`../public/${name}`, import.meta.url))])));
+  const assets = new Map(await Promise.all(['index.html', 'app.js', 'controls.js', 'device-refresh.js'].map(async name => [name, await readFile(new URL(`../public/${name}`, import.meta.url))])));
   assets.set('style.css', await readFile(new URL('../public/style.css', import.meta.url)));
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -35,8 +35,8 @@ export async function createManagementServer({ directory, password, hosts, origi
       for (const [key, expires] of sessions) if (expires < Date.now()) sessions.delete(key);
       for (const [key, value] of enrollments) if (value.until < Date.now()) enrollments.delete(key);
       for (const [key, value] of failures) if (value.until < Date.now()) failures.delete(key);
-      if (req.method === 'GET' && url.pathname === '/api/config') return json(200, { testNoAuth: Boolean(testNoAuth) });
-      if (req.method === 'GET' && ['/', '/app.js', '/controls.js', '/style.css'].includes(url.pathname)) {
+      if (req.method === 'GET' && url.pathname === '/api/config') return json(200, { testNoAuth: Boolean(testNoAuth), apiVersion: 2, transport: 'long-poll' });
+      if (req.method === 'GET' && ['/', '/app.js', '/controls.js', '/device-refresh.js', '/style.css'].includes(url.pathname)) {
         const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
         res.writeHead(200, { 'Content-Type': name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.css') ? 'text/css' : 'text/javascript' });
         return res.end(assets.get(name));
