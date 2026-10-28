@@ -1,7 +1,7 @@
 # Remote Controller MVP
 
 A Node.js agent for managed PCs and a separate central management server. Requires
-Node.js 22 or newer. The agent uses `yazl` to create ZIP archives; install dependencies with `npm ci`.
+Node.js 22 or newer. The agent uses `yazl` to create ZIP archives. Startup installs missing runtime dependencies automatically.
 
 ## Quick test: two terminals, no passwords
 
@@ -299,3 +299,19 @@ status; byte-by-byte progress and resumable transfers are not implemented.
 Interrupted uploads do not appear as completed archives; temporary ZIPs on the
 agent are removed after success/failure. The browser clipboard lasts for the
 current PC page only.
+
+## Automatic dependency setup on startup
+
+`npm start`, `npm run dev:agent`, and the agent's `npm run dev` first check
+production dependencies against package-lock.json. Missing or outdated runtime
+packages are installed before the agent is imported. An up-to-date installation
+starts directly, without a registry request. The server uses the same startup
+check and currently has no external runtime dependencies.
+
+In this workspace, setup uses `npm ci --omit=dev --ignore-scripts` from the root
+lockfile. A standalone package uses its local lockfile, or `npm install --omit=dev
+--ignore-scripts` on its first launch if no lockfile exists. Installation preserves
+normal TLS/checksum verification. Failed installs stop startup with a clear npm
+error; internet access and writable installation directories are required only
+when packages need installation. Tests still require a full `npm ci` (including
+dev dependencies). No environment configuration or saved device identity is removed.

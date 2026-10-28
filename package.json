@@ -11,7 +11,7 @@
     "device": "npm start --workspace=@remote-controller/agent",
     "management": "npm start --workspace=@remote-controller/server",
     "test": "npm run test --workspaces && npm run test:integration",
-    "test:integration": "node --test test/management.test.js",
+    "test:integration": "node --test test/management.test.js test/bootstrap.test.js",
     "check": "npm run check --workspaces",
     "dev:server": "npm run dev --workspace=@remote-controller/server",
     "dev:agent": "npm run dev --workspace=@remote-controller/agent"

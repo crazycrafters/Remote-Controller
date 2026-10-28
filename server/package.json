@@ -7,9 +7,9 @@
   },
   "name": "@remote-controller/server",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node bootstrap.mjs src/server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/registry.js && node --check public/app.js && node --check src/commands.js && node --check public/controls.js && node --check public/device-refresh.js && node --check src/presence.js && node --check src/archives.js",
-    "dev": "node src/server.js --test-no-auth"
+    "check": "node --check src/server.js && node --check src/registry.js && node --check public/app.js && node --check src/commands.js && node --check public/controls.js && node --check public/device-refresh.js && node --check src/presence.js && node --check src/archives.js && node --check bootstrap.mjs",
+    "dev": "node bootstrap.mjs src/server.js --test-no-auth"
   }
 }

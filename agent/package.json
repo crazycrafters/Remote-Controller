@@ -7,11 +7,11 @@
   },
   "name": "@remote-controller/agent",
   "scripts": {
-    "start": "node src/index.js",
-    "control": "node src/control-server.js",
+    "start": "node bootstrap.mjs src/index.js",
+    "control": "node bootstrap.mjs src/control-server.js",
     "test": "node --test",
-    "check": "node --check src/device-client.js && node --check src/control-server.js && node --check src/agent.js && node --check src/filesystem.js && node --check src/processes.js && node --check public/app.js && node --check src/index.js && node --check src/remote-controls.js && node --check src/connection.js && node --check src/terminal.js && node --check src/profiles.js && node --check src/file-actions.js",
-    "dev": "node src/index.js"
+    "check": "node --check src/device-client.js && node --check src/control-server.js && node --check src/agent.js && node --check src/filesystem.js && node --check src/processes.js && node --check public/app.js && node --check src/index.js && node --check src/remote-controls.js && node --check src/connection.js && node --check src/terminal.js && node --check src/profiles.js && node --check src/file-actions.js && node --check bootstrap.mjs",
+    "dev": "node bootstrap.mjs src/index.js"
   },
   "dependencies": {
     "yazl": "^3.3.1"
